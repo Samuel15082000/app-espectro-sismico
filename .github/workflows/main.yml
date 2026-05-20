@@ -1,0 +1,32 @@
+name: Build WASM
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v12
+
+      - name: Compile newmark.cpp
+        run: |
+          emcc newmark.cpp -O3 -o newmark.js \
+               -s MODULARIZE=1 \
+               -s EXPORT_NAME="NewmarkModule" \
+               -s EXPORTED_FUNCTIONS='["_computeSpectrum","_malloc","_free"]' \
+               -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","HEAPF64","HEAP32"]' \
+               -s ALLOW_MEMORY_GROWTH=1 \
+               -s ENVIRONMENT='web,worker'
+
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-files
+          path: |
+            newmark.js
+            newmark.wasm
