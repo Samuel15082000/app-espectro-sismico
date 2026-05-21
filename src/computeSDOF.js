@@ -61,9 +61,10 @@ export function computeSDOF({
 
   for (let i = 0; i < n - 1; i++) {
     const pEff = -m * ug[i + 1] + a1N * u[i] + a2N * v[i] + a3N * a[i]
+    const fs0  = fs[i]   // referencia fija para el predictor elástico
 
     let des  = u[i]
-    let fel  = fs[i]
+    let fel  = fs0
     let rigT = KT[i]
     let Kp   = rigT + a1N
     let R    = pEff - fel - a1N * des
@@ -71,7 +72,7 @@ export function computeSDOF({
 
     while (Math.abs(R) > tol && iter < maxIter) {
       des += R / Kp
-      const fTrial = fel + k * (des - u[i])
+      const fTrial = fs0 + k * (des - u[i])   // siempre desde fs[i]
       const Fy     = k * uy
 
       if (Math.abs(fTrial) > Fy) {
