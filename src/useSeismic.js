@@ -179,16 +179,32 @@ function detectColumnCount(rawLines, start, end, colSep, decSep) {
   return maxCols
 }
 
-function isMonotonicallyIncreasing(rawLines, start, end, colSep, decSep, colIdx) {
-  let prev = -Infinity, count = 0
-  const sampleEnd = Math.min(start + 50, end)
+// Una columna es "tiempo" si cumple las tres propiedades físicas del tiempo:
+//   1. Todos los valores >= 0  (el tiempo nunca es negativo)
+//   2. Monótonamente creciente
+//   3. Diferencias aproximadamente constantes (dt uniforme, CV < 2%)
+// Esto evita confundir aceleraciones que accidentalmente suben con tiempo.
+function isTimeColumn(rawLines, start, end, colSep, decSep, colIdx) {
+  const vals = []
+  const sampleEnd = Math.min(start + 60, end)
   for (let i = start; i <= sampleEnd; i++) {
     const parts = splitLine(rawLines[i], colSep, decSep)
-    if (parts.length <= colIdx) continue
-    if (parts[colIdx] <= prev) return false
-    prev = parts[colIdx]; count++
+    if (parts.length > colIdx) { vals.push(parts[colIdx]); if (vals.length >= 15) break }
   }
-  return count >= 3
+  if (vals.length < 3) return false
+  // 1. Sin valores negativos
+  if (vals.some(v => v < 0)) return false
+  // 2. Creciente
+  for (let i = 1; i < vals.length; i++) {
+    if (vals[i] <= vals[i - 1]) return false
+  }
+  // 3. dt uniforme
+  const diffs = []
+  for (let i = 1; i < vals.length; i++) diffs.push(vals[i] - vals[i - 1])
+  const meanDt = diffs.reduce((a, b) => a + b, 0) / diffs.length
+  if (meanDt <= 0) return false
+  const maxDev = Math.max(...diffs.map(d => Math.abs(d - meanDt)))
+  return maxDev / meanDt < 0.02  // dt constante dentro del 2%
 }
 
 function detectDtFromColumn(rawLines, start, end, colSep, decSep, colIdx) {
@@ -209,25 +225,25 @@ export function analyzeBlock(rawLines, start, end) {
   const { colSep, decSep } = autoDetectSeparators(rawLines, start, end)
   const nCols = detectColumnCount(rawLines, start, end, colSep, decSep)
 
-  let format = 'single', accelCol = 1, timeCol = 1, dt = 0.01, dtDetected = false
+  let format = 'single', accelCol = 1, timeCol = 1, dt = 0.01, dtDetected = false, hasTimeCol = false
 
   if (nCols >= 6) {
     format = 'horizontal'
   } else if (nCols === 1) {
     format = 'single'
   } else if (nCols === 2) {
-    if (isMonotonicallyIncreasing(rawLines, start, end, colSep, decSep, 0)) {
-      format = 'time_accel'; timeCol = 1; accelCol = 2
+    if (isTimeColumn(rawLines, start, end, colSep, decSep, 0)) {
+      format = 'time_accel'; timeCol = 1; accelCol = 2; hasTimeCol = true
       dt = detectDtFromColumn(rawLines, start, end, colSep, decSep, 0); dtDetected = true
     } else {
-      format = 'multi_col'; accelCol = 1
+      format = 'multi_col'; accelCol = 1; hasTimeCol = false
     }
   } else if (nCols >= 3 && nCols <= 5) {
-    if (isMonotonicallyIncreasing(rawLines, start, end, colSep, decSep, 0)) {
-      format = 'multi_col'; timeCol = 1; accelCol = 2
+    if (isTimeColumn(rawLines, start, end, colSep, decSep, 0)) {
+      format = 'multi_col'; timeCol = 1; accelCol = 2; hasTimeCol = true
       dt = detectDtFromColumn(rawLines, start, end, colSep, decSep, 0); dtDetected = true
     } else {
-      format = 'multi_col'; accelCol = 1
+      format = 'multi_col'; accelCol = 1; hasTimeCol = false
     }
   }
 
@@ -255,7 +271,7 @@ export function analyzeBlock(rawLines, start, end) {
 
   return {
     start, end, colSep, decSep, nCols, format,
-    accelCol, timeCol, dt, dtDetected,
+    accelCol, timeCol, dt, dtDetected, hasTimeCol,
     npts, lastLineText, lastLineNum, lastParsed, firstParsed,
   }
 }

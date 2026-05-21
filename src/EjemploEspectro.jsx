@@ -134,6 +134,7 @@ function BlockConfig({ rawLines, blockAnalysis, detectedFormat, onApply, onBack,
   const [timeCol,     setTimeCol]     = useState(d.timeCol || 1)
   const [manualDt,    setManualDt]    = useState(d.dt || 0.01)
   const [scaleFactor, setScaleFactor] = useState(1.0)
+  const [hasTimeCol,  setHasTimeCol]  = useState(!!d.hasTimeCol)
 
   // Último valor: actualiza cuando cambia rango o separadores
   const [lastInfo, setLastInfo] = useState({
@@ -172,8 +173,12 @@ function BlockConfig({ rawLines, blockAnalysis, detectedFormat, onApply, onBack,
     num: previewStart + i + 1, text: line,
   }))
 
-  const handleOK = () =>
-    onApply({ userStart, userEnd, format, accelCol, timeCol, colSep, decSep, scaleFactor, manualDt, unitFactor })
+  const handleOK = () => {
+    // Si no hay columna de tiempo, igualamos timeCol a accelCol para que
+    // parseFileData no intente leer tiempo (tIdx === aIdx → timeArr queda vacío)
+    const effectiveTimeCol = hasTimeCol ? timeCol : accelCol
+    onApply({ userStart, userEnd, format, accelCol, timeCol: effectiveTimeCol, colSep, decSep, scaleFactor, manualDt, unitFactor })
+  }
 
   const labelS = { fontSize: 11, color: '#8B949E', minWidth: mobile ? 80 : 110 }
   const rowS   = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }
@@ -256,12 +261,24 @@ function BlockConfig({ rawLines, blockAnalysis, detectedFormat, onApply, onBack,
                     style={inp({ width: 55, textAlign: 'right' })} />
                 </div>
                 {format === 'multi_col' && (
-                  <div style={rowS}>
-                    <span style={labelS}>Col. Tiempo</span>
-                    <input type="number" min={1} max={20} value={timeCol}
-                      onChange={e => setTimeCol(Math.max(1, Number(e.target.value)))}
-                      style={inp({ width: 55, textAlign: 'right' })} />
-                  </div>
+                  <>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6, cursor: 'pointer', fontSize: 11, color: '#8B949E' }}>
+                      <input type="checkbox" checked={hasTimeCol} onChange={e => setHasTimeCol(e.target.checked)}
+                        style={{ accentColor: ACCENT, width: 13, height: 13 }} />
+                      ¿El archivo tiene columna de tiempo?
+                      <span style={{ fontSize: 9, color: hasTimeCol ? '#3FB950' : '#555' }}>
+                        {hasTimeCol ? '(detectado)' : '(solo aceleraciones)'}
+                      </span>
+                    </label>
+                    {hasTimeCol && (
+                      <div style={rowS}>
+                        <span style={labelS}>Col. Tiempo</span>
+                        <input type="number" min={1} max={20} value={timeCol}
+                          onChange={e => setTimeCol(Math.max(1, Number(e.target.value)))}
+                          style={inp({ width: 55, textAlign: 'right' })} />
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -272,8 +289,11 @@ function BlockConfig({ rawLines, blockAnalysis, detectedFormat, onApply, onBack,
               <span style={labelS}>dt (s)</span>
               <input type="number" min={0.00001} step={0.001} value={manualDt}
                 onChange={e => setManualDt(parseFloat(e.target.value) || 0.01)}
-                style={inp({ width: 100, textAlign: 'right' })} />
-              {d.dtDetected && <span style={{ fontSize: 9, color: '#3FB950' }}>auto-detectado</span>}
+                style={inp({ width: 100, textAlign: 'right' })}
+                disabled={hasTimeCol && d.dtDetected} />
+              {hasTimeCol && d.dtDetected
+                ? <span style={{ fontSize: 9, color: '#3FB950' }}>auto (columna tiempo)</span>
+                : <span style={{ fontSize: 9, color: ACCENT }}>ingrese manualmente</span>}
             </div>
             <div style={rowS}>
               <span style={labelS}>Scaling factor</span>
