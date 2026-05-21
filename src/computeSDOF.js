@@ -1,15 +1,19 @@
 // ============================================================
 //  computeSDOF.js — INERTIX
-//  Newmark-Beta No Lineal — SDOF Bilineal
-//  Traducción directa de newmark_nonlineal.cpp
+//  Newmark-Beta No Lineal — SDOF Bilineal (modelo bilineal no degradante)
+//
+//  Algoritmo: conmutación de rigidez con líneas A/B/C fijas
+//  Ref: Gavin, CEE 541 Duke (NumericalIntegration 2020, BilinearHysteresis 2014)
+//
+//  Línea A (plástica positiva): fs = k2·u + Fy·(1−α)
+//  Línea B (plástica negativa): fs = k2·u − Fy·(1−α)
+//  Línea C (descarga elástica): fs = k·u + (Rt − k·xt)  ← varía por punto de giro
 //
 //  Unidades internas: ton · kN · m · s
 //    m   → ton        k   → kN/m
 //    ug  → m/s²       u   → m
 //    fs  → kN         v   → m/s
 // ============================================================
-
-function signFn(x) { return x > 0 ? 1.0 : x < 0 ? -1.0 : 0.0 }
 
 // Conversores de unidades para la entrada
 export const MASS_UNITS = [
@@ -57,41 +61,78 @@ export function computeSDOF({
   u[0] = u0;  v[0] = v0;  fs[0] = 0.0;  KT[0] = k
   a[0] = (-m * ug[0] - c * v[0] - k * u[0]) / m
 
+  const Fy    = k * uy
+  const k2    = alpha * k
+  const A_off = Fy * (1.0 - alpha)   // fs = k2·u + A_off  (línea A, rama plástica +)
+  const B_off = -A_off               // fs = k2·u + B_off  (línea B, rama plástica −)
+
+  // Estado de rama persistente entre pasos:
+  //   bSign = 0  → elástica (línea C)
+  //   bSign = 1  → plástica positiva (línea A)
+  //   bSign = -1 → plástica negativa (línea B)
+  //   bK, bOff  → fs = bK·u + bOff para la rama actual
+  let bSign = 0
+  let bK    = k
+  let bOff  = 0.0   // línea C desde el origen: fs = k·u + 0
+
   let convergedAll = true
 
   for (let i = 0; i < n - 1; i++) {
     const pEff = -m * ug[i + 1] + a1N * u[i] + a2N * v[i] + a3N * a[i]
-    const fs0  = fs[i]   // referencia fija para el predictor elástico
 
-    let des  = u[i]
-    let fel  = fs0
-    let rigT = KT[i]
-    let Kp   = rigT + a1N
-    let R    = pEff - fel - a1N * des
-    let iter = 0
+    // ── Entre pasos: detección de inversión (plástica → elástica) ──
+    // Inversión cuando la velocidad cambia de signo respecto a la rama activa.
+    if (uy > 0 && bSign !== 0) {
+      if ((bSign > 0 && v[i] < 0) || (bSign < 0 && v[i] > 0)) {
+        // Punto de giro: (u[i], fs[i]) → nuevo origen de la línea C
+        bK    = k
+        bOff  = fs[i] - k * u[i]
+        bSign = 0
+      }
+    }
+
+    // ── NR con rigidez tangente local (copia mutable del estado) ──
+    let locK    = bK
+    let locOff  = bOff
+    let locSign = bSign
+    let des     = u[i]
+    let fel     = fs[i]
+    let Kp      = locK + a1N
+    let R       = pEff - fel - a1N * des
+    let iter    = 0
 
     while (Math.abs(R) > tol && iter < maxIter) {
       des += R / Kp
-      const fTrial = fs0 + k * (des - u[i])   // siempre desde fs[i]
-      const Fy     = k * uy
 
-      if (Math.abs(fTrial) > Fy) {
-        rigT = alpha * k
-        fel  = (1.0 - alpha) * Fy * signFn(fTrial) + alpha * fTrial
-      } else {
-        rigT = k
-        fel  = fTrial
+      let fTrial = locK * des + locOff
+
+      // Elástica → plástica: se verifica solo cuando estamos en línea C
+      if (uy > 0 && locSign === 0) {
+        if (fTrial > +Fy) {
+          locK = k2;  locOff = A_off;  locSign = 1
+          fTrial = k2 * des + A_off
+        } else if (fTrial < -Fy) {
+          locK = k2;  locOff = B_off;  locSign = -1
+          fTrial = k2 * des + B_off
+        }
       }
-      Kp = rigT + a1N
-      R  = pEff - fel - a1N * des
+
+      fel = fTrial
+      Kp  = locK + a1N
+      R   = pEff - fel - a1N * des
       iter++
     }
 
     if (iter >= maxIter) convergedAll = false
 
     u[i + 1]  = des
-    KT[i + 1] = rigT
+    KT[i + 1] = locK
     fs[i + 1] = fel
+
+    // Actualizar estado de rama para el próximo paso
+    bK    = locK
+    bOff  = locOff
+    bSign = locSign
 
     v[i + 1] = gammaN / (betaN * dt) * (u[i + 1] - u[i])
              + (1.0 - gammaN / betaN) * v[i]
