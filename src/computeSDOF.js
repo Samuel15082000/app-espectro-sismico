@@ -123,22 +123,25 @@ export function computeSDOF({
   }
 }
 
-export function exportSDOFTxt(result, dt, params, fileName) {
+export function exportSDOFTxt(result, dt, params, fileName, units) {
   const { m, k, xi, uy, alpha } = params
-  const W = 16
+  const dispU  = units?.disp  || { label: 'cm',    factor: 100      }
+  const accelU = units?.accel || { label: 'cm/s²', factor: 100      }
+  const forceU = units?.force || { label: 'kN',    factor: 1        }
+  const W = 18
   const p = (s) => String(s).padEnd(W)
   let txt = '# ============================================================\n'
   txt += '# INERTIX - Análisis SDOF No Lineal (Newmark-Beta)\n'
   txt += `# Registro: ${fileName || 'N/A'}\n`
   txt += `# m = ${m.toFixed(6)} ton    k = ${k.toFixed(6)} kN/m    xi = ${(xi * 100).toFixed(2)}%\n`
   txt += `# T = ${(2 * Math.PI / Math.sqrt(k / m)).toFixed(4)} s    uy = ${(uy * 100).toFixed(4)} cm    alpha = ${(alpha * 100).toFixed(2)}%\n`
-  txt += `# max|u| = ${(result.maxU * 100).toFixed(4)} cm    max|v| = ${result.maxV.toFixed(4)} m/s\n`
-  txt += `# max|a_abs| = ${result.maxAbs.toFixed(4)} m/s²    Ductilidad = ${result.ductility.toFixed(3)}\n`
+  txt += `# max|u| = ${(result.maxU * dispU.factor).toFixed(4)} ${dispU.label}    max|v| = ${result.maxV.toFixed(4)} m/s\n`
+  txt += `# max|a_abs| = ${(result.maxAbs * accelU.factor).toFixed(4)} ${accelU.label}    Ductilidad = ${result.ductility.toFixed(3)}\n`
   txt += '# ============================================================\n'
-  txt += `  ${p('t(s)')}${p('u(m)')}${p('v(m/s)')}${p('a_abs(m/s2)')}${p('fs(kN)')}\n`
+  txt += `  ${p('t(s)')}${p(`u(${dispU.label})`)}${p('v(m/s)')}${p(`a_abs(${accelU.label})`)}${p(`fs(${forceU.label})`)}\n`
   txt += `  ${'-'.repeat(W * 5)}\n`
   for (let i = 0; i < result.u.length; i++) {
-    txt += `  ${p((i * dt).toFixed(6))}${p(result.u[i].toFixed(8))}${p(result.v[i].toFixed(8))}${p(result.aAbs[i].toFixed(8))}${p(result.fs[i].toFixed(8))}\n`
+    txt += `  ${p((i * dt).toFixed(6))}${p((result.u[i] * dispU.factor).toFixed(8))}${p(result.v[i].toFixed(8))}${p((result.aAbs[i] * accelU.factor).toFixed(8))}${p((result.fs[i] * forceU.factor).toFixed(8))}\n`
   }
   const blob = new Blob([txt], { type: 'text/plain' })
   const el = document.createElement('a')

@@ -4,7 +4,7 @@
 //  Requiere: recharts
 // =============================================================================
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNewmark } from './useNewmark'
 import { useSeismic, exportTxt, FORMAT_TYPES, DECIMAL_SEPS, COL_SEPS, analyzeBlock, splitLine } from './useSeismic'
 import {
@@ -123,7 +123,9 @@ function BlockSelector({ blocks, rawLines, selectedIdx, onSelect, onNext, onCanc
 // =============================================================================
 //  MODAL — PASO 2: Configuración del bloque seleccionado
 // =============================================================================
-function BlockConfig({ rawLines, blockAnalysis, detectedFormat, onApply, onBack, onCancel, unitFactor }) {
+function BlockConfig({ rawLines, blockAnalysis, detectedFormat, onApply, onBack, onCancel,
+                       unitIdx: initUnitIdx, setUnitIdx: syncUnitIdx,
+                       customFactor: initCustomFactor, setCustomFactor: syncCustomFactor }) {
   const mobile = useIsMobile()
   const d = blockAnalysis || {}
 
@@ -137,6 +139,9 @@ function BlockConfig({ rawLines, blockAnalysis, detectedFormat, onApply, onBack,
   const [manualDt,    setManualDt]    = useState(d.dt || 0.01)
   const [scaleFactor, setScaleFactor] = useState(1.0)
   const [hasTimeCol,  setHasTimeCol]  = useState(!!d.hasTimeCol)
+  // Unidades — sincronizadas con el sidebar principal
+  const [localUnitIdx,      setLocalUnitIdx]      = useState(initUnitIdx ?? 0)
+  const [localCustomFactor, setLocalCustomFactor] = useState(initCustomFactor ?? 1)
 
   // Último valor: actualiza cuando cambia rango o separadores
   const [lastInfo, setLastInfo] = useState({
@@ -176,10 +181,13 @@ function BlockConfig({ rawLines, blockAnalysis, detectedFormat, onApply, onBack,
   }))
 
   const handleOK = () => {
-    // Si no hay columna de tiempo, igualamos timeCol a accelCol para que
-    // parseFileData no intente leer tiempo (tIdx === aIdx → timeArr queda vacío)
+    const localUnitFactor = UNIT_OPTIONS[localUnitIdx]?.factor !== null
+      ? UNIT_OPTIONS[localUnitIdx].factor
+      : localCustomFactor
     const effectiveTimeCol = hasTimeCol ? timeCol : accelCol
-    onApply({ userStart, userEnd, format, accelCol, timeCol: effectiveTimeCol, colSep, decSep, scaleFactor, manualDt, unitFactor })
+    syncUnitIdx?.(localUnitIdx)
+    syncCustomFactor?.(localCustomFactor)
+    onApply({ userStart, userEnd, format, accelCol, timeCol: effectiveTimeCol, colSep, decSep, scaleFactor, manualDt, unitFactor: localUnitFactor })
   }
 
   const labelS = { fontSize: 11, color: '#8B949E', minWidth: mobile ? 80 : 110 }
@@ -304,6 +312,25 @@ function BlockConfig({ rawLines, blockAnalysis, detectedFormat, onApply, onBack,
                 style={inp({ width: 100, textAlign: 'right' })} />
             </div>
 
+            <div style={sepS}></div>
+            <div style={secS}>Unidades de entrada</div>
+            {UNIT_OPTIONS.map((u, i) => (
+              <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 12, marginBottom: 4, color: localUnitIdx === i ? '#E6EDF3' : '#8B949E' }}>
+                <input type="radio" name="blunit" checked={localUnitIdx === i}
+                  onChange={() => { setLocalUnitIdx(i); if (u.factor !== null) setLocalCustomFactor(u.factor) }}
+                  style={{ accentColor: ACCENT }} />
+                {u.label}
+              </label>
+            ))}
+            {localUnitIdx === 3 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ fontSize: 11, color: '#8B949E' }}>Factor → cm/s²</span>
+                <input type="number" min={0.0001} step={0.01} value={localCustomFactor}
+                  onChange={e => setLocalCustomFactor(parseFloat(e.target.value) || 1)}
+                  style={inp({ width: 80, textAlign: 'right' })} />
+              </div>
+            )}
+
             {/* Último valor registrado */}
             <div style={sepS}></div>
             <div style={secS}>Último valor del registro</div>
@@ -365,7 +392,7 @@ function BlockConfig({ rawLines, blockAnalysis, detectedFormat, onApply, onBack,
 // =============================================================================
 //  MODAL ORQUESTADOR (2 pasos)
 // =============================================================================
-function FileConfigModal({ rawLines, detectedConfig, onApply, onCancel, unitFactor }) {
+function FileConfigModal({ rawLines, detectedConfig, onApply, onCancel, unitIdx, setUnitIdx, customFactor, setCustomFactor }) {
   const d      = detectedConfig || {}
   const blocks = d.blocks || []
 
@@ -405,7 +432,10 @@ function FileConfigModal({ rawLines, detectedConfig, onApply, onCancel, unitFact
       onApply={onApply}
       onBack={blocks.length > 0 ? () => setStep(1) : null}
       onCancel={onCancel}
-      unitFactor={unitFactor}
+      unitIdx={unitIdx}
+      setUnitIdx={setUnitIdx}
+      customFactor={customFactor}
+      setCustomFactor={setCustomFactor}
     />
   )
 }
@@ -431,13 +461,26 @@ export default function EjemploEspectro() {
   const [loading,      setLoading]      = useState(false)
   const [showBaseline, setShowBaseline] = useState(false)
   const [showSDOF,     setShowSDOF]     = useState(false)
+  const [staleResult,  setStaleResult]  = useState(false)
 
   const unitFactor = UNIT_OPTIONS[unitIdx].factor !== null ? UNIT_OPTIONS[unitIdx].factor : customFactor
+
+  // Cuando cambia la unidad: re-escala los datos cargados y avisa si hay un espectro calculado
+  const prevUnitFactor = useRef(unitFactor)
+  useEffect(() => {
+    if (prevUnitFactor.current === unitFactor) return
+    prevUnitFactor.current = unitFactor
+    if (seismic.parsedRef.current.accelRaw?.length) {
+      seismic.rescaleAccel(unitFactor)
+      if (result) setStaleResult(true)
+    }
+  }, [unitFactor])
 
   const handleCalculate = useCallback(async () => {
     const { accel, dt } = seismic.parsedRef.current
     if (!accel || !dt) { seismic.setStatus({ type: 'error', msg: 'Cargue un registro sísmico primero.' }); return }
     setLoading(true)
+    setStaleResult(false)
     seismic.setStatus({ type: 'info', msg: `Calculando... (${accel.length.toLocaleString()} pts)` })
     try {
       const xiArr = dampings.slice(0, nCurves).map(d => d / 100)
@@ -489,8 +532,11 @@ export default function EjemploEspectro() {
         <FileConfigModal
           rawLines={seismic.rawLines}
           detectedConfig={seismic.detectedConfig}
-          unitFactor={unitFactor}
-          onApply={config => seismic.applyConfig(config)}
+          unitIdx={unitIdx}
+          setUnitIdx={setUnitIdx}
+          customFactor={customFactor}
+          setCustomFactor={setCustomFactor}
+          onApply={config => { seismic.applyConfig(config); setStaleResult(false) }}
           onCancel={() => seismic.setShowModal(false)}
         />
       )}
@@ -657,6 +703,12 @@ export default function EjemploEspectro() {
               </div>
             </section>
           </>}
+
+          {staleResult && (
+            <div style={{ fontSize: 11, padding: '6px 9px', borderRadius: 5, background: '#2A1F0A', color: '#FBBF24', border: '1px solid #4A3A10' }}>
+              ⚠ Unidades modificadas — espectro no actualizado
+            </div>
+          )}
 
           <button onClick={handleCalculate} disabled={!canCalc} style={{
             width: '100%', padding: mobile ? '12px' : '10px', borderRadius: 6, border: 'none',

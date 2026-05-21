@@ -20,6 +20,22 @@ const BLUE    = '#60A5FA'
 const PURPLE  = '#A78BFA'
 const YELLOW  = '#FBBF24'
 
+const DISP_UNITS  = [
+  { label: 'cm',  factor: 100       },
+  { label: 'm',   factor: 1         },
+  { label: 'mm',  factor: 1000      },
+]
+const ACCEL_UNITS = [
+  { label: 'cm/s²', factor: 100       },
+  { label: 'm/s²',  factor: 1         },
+  { label: 'g',     factor: 1/9.80665 },
+]
+const FORCE_UNITS = [
+  { label: 'kN',   factor: 1          },
+  { label: 'tonf', factor: 1/9.80665  },
+  { label: 'N',    factor: 1000       },
+]
+
 const inp = (x) => ({ background: BG_DARK, border: `1px solid ${BORDER}`, color: '#E6EDF3', borderRadius: 5, padding: '5px 7px', fontSize: 12, boxSizing: 'border-box', ...x })
 const tp  = { contentStyle: { background: BG_PANEL, border: `1px solid ${BORDER}`, borderRadius: 5, fontSize: 11 } }
 const sec = { fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }
@@ -40,6 +56,12 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
   // Newmark
   const [betaN,   setBetaN]   = useState(0.25)
   const [gammaN,  setGammaN]  = useState(0.50)
+  const [maxIter, setMaxIter] = useState(50)
+  const [tol,     setTol]     = useState(1e-6)
+  // Unidades de salida
+  const [dispUnitIdx,  setDispUnitIdx]  = useState(0)
+  const [accelUnitIdx, setAccelUnitIdx] = useState(0)
+  const [forceUnitIdx, setForceUnitIdx] = useState(0)
   // Resultado
   const [result,  setResult]  = useState(null)
   const [err,     setErr]     = useState(null)
@@ -76,6 +98,7 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
           betaN, gammaN, dt,
           uy: uyM, alpha: aAlp,
           ug: ugMs2,
+          tol, maxIter,
         })
         setResult(res)
       } catch (e) {
@@ -88,34 +111,38 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
   // Datos para gráficas de series de tiempo (downsample)
   const timeChartData = useMemo(() => {
     if (!result) return null
-    const n    = result.u.length
-    const step = Math.max(1, Math.floor(n / 2000))
-    const data = []
+    const n      = result.u.length
+    const step   = Math.max(1, Math.floor(n / 2000))
+    const dispF  = DISP_UNITS[dispUnitIdx].factor
+    const accelF = ACCEL_UNITS[accelUnitIdx].factor
+    const data   = []
     for (let i = 0; i < n; i += step) {
       data.push({
-        t:  parseFloat((i * dt).toFixed(4)),
-        u:  parseFloat((result.u[i]    * 100).toFixed(5)),   // m → cm
-        v:  parseFloat(result.v[i].toFixed(6)),
-        a:  parseFloat((result.aAbs[i] * 100).toFixed(5)),   // m/s² → cm/s²
+        t: parseFloat((i * dt).toFixed(4)),
+        u: parseFloat((result.u[i]    * dispF).toFixed(5)),
+        v: parseFloat(result.v[i].toFixed(6)),
+        a: parseFloat((result.aAbs[i] * accelF).toFixed(5)),
       })
     }
     return data
-  }, [result, dt])
+  }, [result, dt, dispUnitIdx, accelUnitIdx])
 
   // Datos para lazo histéretico (u en cm, fs en kN)
   const hystData = useMemo(() => {
     if (!result) return null
-    const n    = result.u.length
-    const step = Math.max(1, Math.floor(n / 3000))
-    const data = []
+    const n      = result.u.length
+    const step   = Math.max(1, Math.floor(n / 3000))
+    const dispF  = DISP_UNITS[dispUnitIdx].factor
+    const forceF = FORCE_UNITS[forceUnitIdx].factor
+    const data   = []
     for (let i = 0; i < n; i += step) {
       data.push({
-        u:  parseFloat((result.u[i] * 100).toFixed(5)),   // cm
-        fs: parseFloat(result.fs[i].toFixed(5)),           // kN
+        u:  parseFloat((result.u[i] * dispF).toFixed(5)),
+        fs: parseFloat((result.fs[i] * forceF).toFixed(5)),
       })
     }
     return data
-  }, [result])
+  }, [result, dispUnitIdx, forceUnitIdx])
 
   const paramsSI = { m: mSI, k: kSI, xi: xi / 100, uy: uyVal * UY_UNITS[uyUnit].factor, alpha: alpha / 100 }
 
@@ -194,8 +221,41 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
               <span style={{ ...lbl, minWidth: 18 }}>γ</span>
               <input type="number" min={0} max={1} step={0.01} value={gammaN} onChange={e => setGammaN(parseFloat(e.target.value) || 0.5)} style={inp({ width: 75, textAlign: 'right' })} />
             </div>
-            <div style={{ fontSize: 10, color: betaN === 0.25 ? '#3FB950' : ACCENT, marginBottom: 6 }}>
+            <div style={{ fontSize: 10, color: betaN === 0.25 ? '#3FB950' : ACCENT, marginBottom: 4 }}>
               {betaN === 0.25 ? '→ Incondicionalmente estable' : '→ Verificar estabilidad'}
+            </div>
+            <div style={row}>
+              <span style={{ ...lbl, minWidth: 18 }}>iter</span>
+              <input type="number" min={10} max={500} step={10} value={maxIter}
+                onChange={e => setMaxIter(Math.max(10, Number(e.target.value)))}
+                style={inp({ width: 75, textAlign: 'right' })} />
+            </div>
+            <div style={row}>
+              <span style={{ ...lbl, minWidth: 18 }}>tol</span>
+              <input type="number" min={1e-12} step={1e-7} value={tol}
+                onChange={e => setTol(parseFloat(e.target.value) || 1e-6)}
+                style={inp({ width: 75, textAlign: 'right' })} />
+            </div>
+
+            {/* [4] Unidades de salida */}
+            <div style={{ borderTop: `1px solid ${BORDER}`, paddingTop: 8, ...sec }}>[4] Unidades Salida</div>
+            <div style={row}>
+              <span style={{ ...lbl, minWidth: 18 }}>u</span>
+              <select value={dispUnitIdx} onChange={e => setDispUnitIdx(Number(e.target.value))} style={inp({ flex: 1 })}>
+                {DISP_UNITS.map((u, i) => <option key={i} value={i}>{u.label}</option>)}
+              </select>
+            </div>
+            <div style={row}>
+              <span style={{ ...lbl, minWidth: 18 }}>a</span>
+              <select value={accelUnitIdx} onChange={e => setAccelUnitIdx(Number(e.target.value))} style={inp({ flex: 1 })}>
+                {ACCEL_UNITS.map((u, i) => <option key={i} value={i}>{u.label}</option>)}
+              </select>
+            </div>
+            <div style={row}>
+              <span style={{ ...lbl, minWidth: 18 }}>fs</span>
+              <select value={forceUnitIdx} onChange={e => setForceUnitIdx(Number(e.target.value))} style={inp({ flex: 1 })}>
+                {FORCE_UNITS.map((u, i) => <option key={i} value={i}>{u.label}</option>)}
+              </select>
             </div>
 
             {/* Botón calcular */}
@@ -218,9 +278,9 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
               <div style={{ borderTop: `1px solid ${BORDER}`, paddingTop: 8 }}>
                 <div style={sec}>Resultados</div>
                 {[
-                  ['max|u|',     `${(result.maxU * 100).toFixed(4)} cm`],
+                  ['max|u|',     `${(result.maxU * DISP_UNITS[dispUnitIdx].factor).toFixed(4)} ${DISP_UNITS[dispUnitIdx].label}`],
                   ['max|v|',     `${result.maxV.toFixed(4)} m/s`],
-                  ['max|a_abs|', `${(result.maxAbs * 100).toFixed(4)} cm/s²`],
+                  ['max|a_abs|', `${(result.maxAbs * ACCEL_UNITS[accelUnitIdx].factor).toFixed(4)} ${ACCEL_UNITS[accelUnitIdx].label}`],
                   ['Ductilidad', `${result.ductility.toFixed(3)}`],
                   ['T',          `${result.T.toFixed(4)} s`],
                 ].map(([lbl2, val]) => (
@@ -236,7 +296,7 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
                 )}
               </div>
 
-              <button onClick={() => exportSDOFTxt(result, dt, paramsSI, fileName)} style={{ padding: '8px', borderRadius: 5, border: `1px solid ${BORDER}`, background: '#21262D', color: '#ccc', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
+              <button onClick={() => exportSDOFTxt(result, dt, paramsSI, fileName, { disp: DISP_UNITS[dispUnitIdx], accel: ACCEL_UNITS[accelUnitIdx], force: FORCE_UNITS[forceUnitIdx] })} style={{ padding: '8px', borderRadius: 5, border: `1px solid ${BORDER}`, background: '#21262D', color: '#ccc', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
                 Descargar .txt
               </button>
             </>)}
@@ -263,7 +323,7 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
               <div>
                 <div style={{ fontSize: 11, color: '#8B949E', marginBottom: 4 }}>
                   Desplazamiento u(t) &nbsp;
-                  <span style={{ color: GREEN }}>max = {(result.maxU * 100).toFixed(4)} cm</span>
+                  <span style={{ color: GREEN }}>max = {(result.maxU * DISP_UNITS[dispUnitIdx].factor).toFixed(4)} {DISP_UNITS[dispUnitIdx].label}</span>
                 </div>
                 <ResponsiveContainer width="100%" height={180}>
                   <LineChart data={timeChartData} margin={{ top: 2, right: 10, left: 0, bottom: 18 }}>
@@ -271,8 +331,8 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
                     <XAxis dataKey="t" stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
                       label={{ value: 'Tiempo (s)', position: 'insideBottom', offset: -8, fill: '#8B949E', fontSize: 10 }} />
                     <YAxis stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
-                      label={{ value: 'u (cm)', angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 20 }} />
-                    <Tooltip {...tp} labelFormatter={v => `t = ${v} s`} formatter={v => [`${v} cm`, 'u']} />
+                      label={{ value: `u (${DISP_UNITS[dispUnitIdx].label})`, angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 20 }} />
+                    <Tooltip {...tp} labelFormatter={v => `t = ${v} s`} formatter={v => [`${v} ${DISP_UNITS[dispUnitIdx].label}`, 'u']} />
                     <Line type="monotone" dataKey="u" stroke={GREEN} dot={false} strokeWidth={1.5} />
                   </LineChart>
                 </ResponsiveContainer>
@@ -282,7 +342,7 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
               <div>
                 <div style={{ fontSize: 11, color: '#8B949E', marginBottom: 4 }}>
                   Aceleración absoluta a<sub>abs</sub>(t) &nbsp;
-                  <span style={{ color: BLUE }}>max = {(result.maxAbs * 100).toFixed(4)} cm/s²</span>
+                  <span style={{ color: BLUE }}>max = {(result.maxAbs * ACCEL_UNITS[accelUnitIdx].factor).toFixed(4)} {ACCEL_UNITS[accelUnitIdx].label}</span>
                 </div>
                 <ResponsiveContainer width="100%" height={180}>
                   <LineChart data={timeChartData} margin={{ top: 2, right: 10, left: 0, bottom: 18 }}>
@@ -290,8 +350,8 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
                     <XAxis dataKey="t" stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
                       label={{ value: 'Tiempo (s)', position: 'insideBottom', offset: -8, fill: '#8B949E', fontSize: 10 }} />
                     <YAxis stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
-                      label={{ value: 'a (cm/s²)', angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 30 }} />
-                    <Tooltip {...tp} labelFormatter={v => `t = ${v} s`} formatter={v => [`${v} cm/s²`, 'a_abs']} />
+                      label={{ value: `a (${ACCEL_UNITS[accelUnitIdx].label})`, angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 30 }} />
+                    <Tooltip {...tp} labelFormatter={v => `t = ${v} s`} formatter={v => [`${v} ${ACCEL_UNITS[accelUnitIdx].label}`, 'a_abs']} />
                     <Line type="monotone" dataKey="a" stroke={BLUE} dot={false} strokeWidth={1.5} />
                   </LineChart>
                 </ResponsiveContainer>
@@ -308,12 +368,12 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
                     <CartesianGrid strokeDasharray="3 3" stroke="#1C2333" />
                     <XAxis dataKey="u" type="number" name="u" stroke="#21262D"
                       tick={{ fontSize: 10, fill: '#8B949E' }}
-                      label={{ value: 'u (cm)', position: 'insideBottom', offset: -8, fill: '#8B949E', fontSize: 10 }} />
+                      label={{ value: `u (${DISP_UNITS[dispUnitIdx].label})`, position: 'insideBottom', offset: -8, fill: '#8B949E', fontSize: 10 }} />
                     <YAxis dataKey="fs" type="number" name="fs" stroke="#21262D"
                       tick={{ fontSize: 10, fill: '#8B949E' }}
-                      label={{ value: 'fs (kN)', angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 20 }} />
+                      label={{ value: `fs (${FORCE_UNITS[forceUnitIdx].label})`, angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 20 }} />
                     <Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ background: BG_PANEL, border: `1px solid ${BORDER}`, fontSize: 11 }}
-                      formatter={(v, n) => [v, n === 'u' ? 'u (cm)' : 'fs (kN)']} />
+                      formatter={(v, n) => [v, n === 'u' ? `u (${DISP_UNITS[dispUnitIdx].label})` : `fs (${FORCE_UNITS[forceUnitIdx].label})`]} />
                     <Scatter data={hystData} line={{ stroke: PURPLE, strokeWidth: 1 }} fill="transparent" />
                   </ScatterChart>
                 </ResponsiveContainer>

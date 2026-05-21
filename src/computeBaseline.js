@@ -98,7 +98,7 @@ function _buildResult(orig, corrected, poly, coef, order) {
   }
 }
 
-export function exportBaselineTxt(accelOrig, corrected, poly, dt, coef, order, stats, fileName) {
+export function exportBaselineTxt(accelOrig, corrected, poly, dt, coef, order, stats, fileName, outFactor = 1, outLabel = 'cm/s²') {
   const labels = ['Constante', 'Lineal', 'Cuadrático', 'Cúbico']
   const W = 18
   const p = (s) => String(s).padEnd(W)
@@ -111,13 +111,15 @@ export function exportBaselineTxt(accelOrig, corrected, poly, dt, coef, order, s
   if (order >= 3) poly_str += ` + (${coef[3].toFixed(8)})*t^3`
   txt += poly_str + '\n'
   txt += `# Registro: ${fileName || 'N/A'}\n`
-  txt += `# RMS original: ${stats.rmsOrig.toFixed(6)} cm/s²  →  corregida: ${stats.rmsCorr.toFixed(6)} cm/s²\n`
-  txt += `# Media original: ${stats.meanOrig.toFixed(6)} cm/s²  →  corregida: ${stats.meanCorr.toFixed(6)} cm/s²\n`
+  txt += `# Unidad salida: ${outLabel}\n`
+  txt += `# RMS original: ${(stats.rmsOrig * outFactor).toFixed(6)} ${outLabel}  →  corregida: ${(stats.rmsCorr * outFactor).toFixed(6)} ${outLabel}\n`
+  txt += `# Media original: ${(stats.meanOrig * outFactor).toFixed(6)} ${outLabel}  →  corregida: ${(stats.meanCorr * outFactor).toFixed(6)} ${outLabel}\n`
   txt += '# ============================================================\n'
-  txt += `  ${p('t(s)')}${p('a_orig(cm/s2)')}${p('P(t)(cm/s2)')}${p('a_corr(cm/s2)')}\n`
+  const ul = outLabel.replace('²', '2').replace('/', '_')
+  txt += `  ${p('t(s)')}${p(`a_orig(${ul})`)}${p(`P(t)(${ul})`)}${p(`a_corr(${ul})`)}\n`
   txt += `  ${'-'.repeat(W * 4)}\n`
   for (let i = 0; i < accelOrig.length; i++) {
-    txt += `  ${p((i * dt).toFixed(8))}${p(accelOrig[i].toFixed(8))}${p(poly[i].toFixed(8))}${p(corrected[i].toFixed(8))}\n`
+    txt += `  ${p((i * dt).toFixed(8))}${p((accelOrig[i] * outFactor).toFixed(8))}${p((poly[i] * outFactor).toFixed(8))}${p((corrected[i] * outFactor).toFixed(8))}\n`
   }
   const blob = new Blob([txt], { type: 'text/plain' })
   const a = document.createElement('a')

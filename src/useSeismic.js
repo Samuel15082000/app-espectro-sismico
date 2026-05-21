@@ -460,14 +460,20 @@ export function useSeismic() {
       setStatus({ type: 'error', msg: 'No se encontraron datos numéricos con esta configuración.' })
       setShowModal(false); return
     }
-    parsedRef.current = { accel: result.accelArr, dt: result.dt }
+    // Guardamos también los valores crudos para poder re-escalar sin re-parsear
+    parsedRef.current = {
+      accel:     result.accelArr,
+      accelRaw:  result.accelRawArr,
+      scaleFactor: config.scaleFactor ?? 1,
+      dt:        result.dt,
+    }
 
-    const step = Math.max(1, Math.floor(result.accelRawArr.length / 2000))
+    const step = Math.max(1, Math.floor(result.accelArr.length / 2000))
     const chart = []
-    for (let i = 0; i < result.accelRawArr.length; i += step) {
+    for (let i = 0; i < result.accelArr.length; i += step) {
       chart.push({
         t: parseFloat((i * result.dt).toFixed(4)),
-        a: parseFloat(result.accelRawArr[i].toFixed(6)),
+        a: parseFloat(result.accelArr[i].toFixed(6)),   // valores ya escalados
       })
     }
     setAccelChart(chart)
@@ -481,10 +487,27 @@ export function useSeismic() {
     setStatus(null); setShowModal(false)
   }, [rawLines])
 
+  // Recalcula accel y reconstruye el chart cuando cambia la unidad sin re-parsear el archivo
+  const rescaleAccel = useCallback((newUnitFactor) => {
+    const ref = parsedRef.current
+    if (!ref.accelRaw?.length) return
+    const newAccel = ref.accelRaw.map(v => v * newUnitFactor * (ref.scaleFactor ?? 1))
+    parsedRef.current = { ...ref, accel: newAccel }
+    const step = Math.max(1, Math.floor(newAccel.length / 2000))
+    const chart = []
+    for (let i = 0; i < newAccel.length; i += step) {
+      chart.push({
+        t: parseFloat((i * ref.dt).toFixed(4)),
+        a: parseFloat(newAccel[i].toFixed(6)),
+      })
+    }
+    setAccelChart(chart)
+  }, [])
+
   return {
     rawLines, fileName, fileInfo, accelChart, setAccelChart,
     status, setStatus, parsedRef,
     showModal, setShowModal, detectedConfig,
-    handleFile, applyConfig,
+    handleFile, applyConfig, rescaleAccel,
   }
 }
