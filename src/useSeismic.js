@@ -119,48 +119,55 @@ export function detectBlocks(rawLines) {
 }
 
 // ---------------------------------------------------------------------------
-//  Detección de separadores (analiza una muestra del bloque)
+//  Detección de separadores — método por puntuación
+//  Prueba las 5 combinaciones válidas y elige la que parsea más líneas
+//  con columnas consistentes. Más robusto que heurísticas manuales.
 // ---------------------------------------------------------------------------
 function autoDetectSeparators(rawLines, sampleStart, sampleEnd) {
-  let hasSemicolons = false, hasCommasBetweenNumbers = false
-  let hasCommasAsDecimal = false, hasDots = false
-  const end = Math.min(sampleEnd, sampleStart + 30)
+  // Recoger hasta 40 líneas numéricas de muestra
+  const sampleLines = []
+  const limit = Math.min(sampleEnd, sampleStart + 60)
+  for (let i = sampleStart; i <= limit && sampleLines.length < 40; i++) {
+    const t = rawLines[i]?.trim()
+    if (t) sampleLines.push(t)
+  }
+  if (sampleLines.length === 0) return { colSep: 'space', decSep: 'dot' }
 
-  for (let i = sampleStart; i <= end; i++) {
-    const line = rawLines[i]
-    if (!line || !line.trim()) continue
-    if (line.includes(';')) hasSemicolons = true
-    if (line.includes('.')) hasDots = true
-    for (const m of line.matchAll(/(\d),(\d)/g)) {
-      const before = line.substring(Math.max(0, m.index - 5), m.index + 1)
-      const after  = line.substring(m.index + 1, m.index + 10)
-      if (before.includes('.') || after.includes('.')) {
-        hasCommasBetweenNumbers = true
-      } else {
-        const digitsAfter = after.match(/^\d+/)
-        if (digitsAfter && digitsAfter[0].length <= 3 && !/^\d+[\s\t]/.test(after)) {
-          hasCommasAsDecimal = true
-        } else {
-          hasCommasBetweenNumbers = true
-        }
-      }
+  // Combinaciones válidas — NO existe colSep=comma con decSep=comma
+  // Orden: primero las más comunes (preferencia de desempate)
+  const combos = [
+    { colSep: 'space', decSep: 'dot'   },
+    { colSep: 'space', decSep: 'comma' },
+    { colSep: 'comma', decSep: 'dot'   },
+    { colSep: 'semi',  decSep: 'dot'   },
+    { colSep: 'semi',  decSep: 'comma' },
+  ]
+
+  let best = combos[0], bestScore = -1
+
+  for (const combo of combos) {
+    const counts = {}
+    let parsed = 0
+    for (const line of sampleLines) {
+      const n = splitLine(line, combo.colSep, combo.decSep).length
+      if (n > 0) { counts[n] = (counts[n] || 0) + 1; parsed++ }
     }
+    if (parsed === 0) continue
+
+    // Puntuación = fracción de líneas que coinciden con la columna más frecuente
+    // Un archivo bien formado tiene casi todas las líneas con el mismo nCols
+    const maxConsistent = Math.max(...Object.values(counts))
+    const score = maxConsistent / sampleLines.length
+
+    if (score > bestScore) { bestScore = score; best = combo }
   }
 
-  let colSep = 'space'
-  if (hasSemicolons) colSep = 'semi'
-  else if (hasCommasBetweenNumbers && !hasCommasAsDecimal) colSep = 'comma'
-
-  let decSep = 'dot'
-  if (hasCommasAsDecimal && !hasDots && !hasCommasBetweenNumbers) decSep = 'comma'
-  if (colSep === 'semi' && hasCommasAsDecimal) decSep = 'comma'
-
-  return { colSep, decSep }
+  return best
 }
 
 function detectColumnCount(rawLines, start, end, colSep, decSep) {
   const counts = {}
-  const sampleEnd = Math.min(start + 20, end)
+  const sampleEnd = Math.min(start + 30, end)
   for (let i = start; i <= sampleEnd; i++) {
     const n = splitLine(rawLines[i], colSep, decSep).length
     if (n > 0) counts[n] = (counts[n] || 0) + 1
