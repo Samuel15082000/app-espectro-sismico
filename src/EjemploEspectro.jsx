@@ -1,15 +1,12 @@
 // =============================================================================
 //  EjemploEspectro.jsx  —  INERTIX Espectro de Respuesta Sísmica
-//  Con ventana modal de configuración de archivo
-//  Requiere: recharts  (npm install recharts)
+//  Con ventana modal y auto-detección inteligente
+//  Requiere: recharts
 // =============================================================================
 
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useNewmark } from './useNewmark'
-import {
-  useSeismic, exportTxt, detectDataRange, autoDetectFormat,
-  FORMAT_TYPES, DECIMAL_SEPS, COL_SEPS
-} from './useSeismic'
+import { useSeismic, exportTxt, FORMAT_TYPES, DECIMAL_SEPS, COL_SEPS } from './useSeismic'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer
@@ -46,97 +43,80 @@ const inp = (extra) => ({
 const tp = { contentStyle: { background: BG_PANEL, border: `1px solid ${BORDER}`, borderRadius: 5, fontSize: 11 } }
 
 // =============================================================================
-//  MODAL DE CONFIGURACIÓN DE ARCHIVO
+//  MODAL DE CONFIGURACIÓN (valores pre-llenados por auto-detección)
 // =============================================================================
-function FileConfigModal({ rawLines, onApply, onCancel, unitFactor }) {
+function FileConfigModal({ rawLines, detectedConfig, onApply, onCancel, unitFactor }) {
   const mobile = useIsMobile()
+  const d = detectedConfig || {}
 
-  // Separadores (primero porque afectan detección)
-  const [colSep,  setColSep]  = useState('space')
-  const [decSep,  setDecSep]  = useState('dot')
-
-  // Detectar rango y formato automáticamente
-  const detected = useMemo(() => {
-    const range = detectDataRange(rawLines, colSep, decSep)
-    const fmt = autoDetectFormat(rawLines, range.start, range.end, colSep, decSep)
-    return { ...range, ...fmt }
-  }, [rawLines, colSep, decSep])
-
-  const [userStart,   setUserStart]   = useState(0)
-  const [userEnd,     setUserEnd]     = useState(0)
-  const [format,      setFormat]      = useState('single')
-  const [accelCol,    setAccelCol]    = useState(2)
-  const [timeCol,     setTimeCol]     = useState(1)
-  const [manualDt,    setManualDt]    = useState(0.01)
+  // Inicializar con valores auto-detectados
+  const [colSep,      setColSep]      = useState(d.colSep || 'space')
+  const [decSep,      setDecSep]      = useState(d.decSep || 'dot')
+  const [userStart,   setUserStart]   = useState(d.start || 0)
+  const [userEnd,     setUserEnd]     = useState(d.end || 0)
+  const [format,      setFormat]      = useState(d.format || 'single')
+  const [accelCol,    setAccelCol]    = useState(d.accelCol || 1)
+  const [timeCol,     setTimeCol]     = useState(d.timeCol || 1)
+  const [manualDt,    setManualDt]    = useState(d.dt || 0.01)
   const [scaleFactor, setScaleFactor] = useState(1.0)
 
-  // Sincronizar con detección automática
+  // Actualizar cuando cambia detectedConfig
   useEffect(() => {
-    setUserStart(detected.start)
-    setUserEnd(detected.end)
-    setFormat(detected.format)
-    setAccelCol(detected.accelCol)
-    setTimeCol(detected.timeCol)
-  }, [detected])
+    if (!d) return
+    setColSep(d.colSep || 'space')
+    setDecSep(d.decSep || 'dot')
+    setUserStart(d.start || 0)
+    setUserEnd(d.end || 0)
+    setFormat(d.format || 'single')
+    setAccelCol(d.accelCol || 1)
+    setTimeCol(d.timeCol || 1)
+    if (d.dtDetected && d.dt > 0) setManualDt(d.dt)
+  }, [d])
 
-  // Preview de las primeras líneas
-  const preview = useMemo(() => {
-    const start = Math.max(0, userStart)
-    const end = Math.min(rawLines.length - 1, start + 9)
-    return rawLines.slice(start, end + 1).map((line, i) => ({
-      num: start + i + 1,
-      text: line
-    }))
-  }, [rawLines, userStart])
+  // Preview
+  const previewStart = Math.max(0, userStart)
+  const previewEnd = Math.min(rawLines.length - 1, previewStart + 9)
+  const preview = rawLines.slice(previewStart, previewEnd + 1).map((line, i) => ({
+    num: previewStart + i + 1, text: line
+  }))
 
   const handleOK = () => {
-    onApply({
-      userStart, userEnd, format, accelCol, timeCol,
-      colSep, decSep, scaleFactor, manualDt, unitFactor,
-    })
+    onApply({ userStart, userEnd, format, accelCol, timeCol, colSep, decSep, scaleFactor, manualDt, unitFactor })
   }
 
-  const mw = mobile ? '95vw' : 680
-  const labelS = { fontSize: 11, color: '#8B949E', minWidth: mobile ? 80 : 120 }
+  const labelS = { fontSize: 11, color: '#8B949E', minWidth: mobile ? 80 : 115 }
   const rowS = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }
+  const secS = { fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' }
 
   return (
-    <div style={{
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center',
-      justifyContent: 'center', zIndex: 1000, padding: 12,
-    }}>
-      <div style={{
-        background: BG_MODAL, border: `1px solid ${BORDER}`, borderRadius: 10,
-        width: mw, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto',
-        padding: mobile ? 14 : 20, color: '#E6EDF3',
-      }}>
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 12 }}>
+      <div style={{ background: BG_MODAL, border: `1px solid ${BORDER}`, borderRadius: 10, width: mobile ? '95vw' : 700, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', padding: mobile ? 14 : 20, color: '#E6EDF3' }}>
 
         {/* Título */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 15, color: ACCENT }}>Configuración del Archivo</div>
-            <div style={{ fontSize: 11, color: '#8B949E', marginTop: 2 }}>
-              {rawLines.length.toLocaleString()} líneas totales · Auto-detectado: línea {detected.start + 1} a {detected.end + 1}
-            </div>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: ACCENT }}>Parámetros del Archivo de Entrada</div>
+          <div style={{ fontSize: 11, color: '#8B949E', marginTop: 2 }}>
+            {rawLines.length.toLocaleString()} líneas · Datos detectados: línea {(d.start || 0) + 1} a {(d.end || 0) + 1} · ~{d.nCols || '?'} columnas
           </div>
+          {d.dtDetected && (
+            <div style={{ fontSize: 11, color: '#3FB950', marginTop: 2 }}>
+              ✓ dt detectado automáticamente: {d.dt?.toFixed(6)} s
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: mobile ? 'column' : 'row', gap: 16 }}>
 
-          {/* Columna izquierda: Configuración */}
+          {/* Configuración */}
           <div style={{ flex: 1, minWidth: 0 }}>
 
-            {/* Separadores */}
-            <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' }}>Separadores</div>
-
+            <div style={secS}>Separadores</div>
             <div style={rowS}>
               <span style={labelS}>Decimal</span>
               <select value={decSep} onChange={e => setDecSep(e.target.value)} style={inp({ flex: 1 })}>
                 {DECIMAL_SEPS.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
               </select>
             </div>
-
             <div style={rowS}>
               <span style={labelS}>Columnas</span>
               <select value={colSep} onChange={e => setColSep(e.target.value)} style={inp({ flex: 1 })}>
@@ -144,48 +124,36 @@ function FileConfigModal({ rawLines, onApply, onCancel, unitFactor }) {
               </select>
             </div>
 
-            <div style={{ borderTop: `1px solid ${BORDER}`, margin: '8px 0' }}></div>
-
-            {/* Rango de líneas */}
-            <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' }}>Rango de Datos</div>
-
-            <div style={rowS}>
-              <span style={labelS}>Línea inicio</span>
-              <input type="number" min={1} max={rawLines.length}
-                value={userStart + 1}
-                onChange={e => setUserStart(Math.max(0, Number(e.target.value) - 1))}
-                style={inp({ width: 80, textAlign: 'right' })} />
-            </div>
-
-            <div style={rowS}>
-              <span style={labelS}>Línea fin</span>
-              <input type="number" min={userStart + 1} max={rawLines.length}
-                value={userEnd + 1}
-                onChange={e => setUserEnd(Math.max(userStart, Number(e.target.value) - 1))}
-                style={inp({ width: 80, textAlign: 'right' })} />
+            <div style={{ borderTop: `1px solid ${BORDER}`, margin: '6px 0' }}></div>
+            <div style={secS}>Rango de Datos</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, color: '#8B949E', marginBottom: 2 }}>Línea inicio</div>
+                <input type="number" min={1} max={rawLines.length} value={userStart + 1}
+                  onChange={e => setUserStart(Math.max(0, Number(e.target.value) - 1))}
+                  style={inp({ width: '100%', textAlign: 'right' })} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, color: '#8B949E', marginBottom: 2 }}>Línea fin</div>
+                <input type="number" min={userStart + 1} max={rawLines.length} value={userEnd + 1}
+                  onChange={e => setUserEnd(Math.max(userStart, Number(e.target.value) - 1))}
+                  style={inp({ width: '100%', textAlign: 'right' })} />
+              </div>
             </div>
 
             <div style={{ borderTop: `1px solid ${BORDER}`, margin: '8px 0' }}></div>
-
-            {/* Formato */}
-            <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' }}>Formato del Archivo</div>
-
+            <div style={secS}>Formato del Archivo</div>
             {FORMAT_TYPES.map(f => (
-              <label key={f.id} style={{
-                display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6,
-                cursor: 'pointer', fontSize: 12, color: format === f.id ? '#E6EDF3' : '#8B949E'
-              }}>
-                <input type="radio" name="format" value={f.id}
-                  checked={format === f.id}
-                  onChange={() => setFormat(f.id)}
-                  style={{ accentColor: ACCENT }} />
+              <label key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5, cursor: 'pointer', fontSize: 12, color: format === f.id ? '#E6EDF3' : '#8B949E' }}>
+                <input type="radio" name="format" value={f.id} checked={format === f.id}
+                  onChange={() => setFormat(f.id)} style={{ accentColor: ACCENT }} />
                 {f.label}
+                {f.id === d.format && <span style={{ fontSize: 9, color: '#3FB950', marginLeft: 4 }}>(detectado)</span>}
               </label>
             ))}
 
-            {/* Selector de columnas (solo para multi_col y time_accel) */}
             {(format === 'multi_col' || format === 'time_accel') && (
-              <div style={{ marginTop: 6, padding: '8px 10px', background: BG_DARK, borderRadius: 6, border: `1px solid ${BORDER}` }}>
+              <div style={{ marginTop: 4, padding: '8px 10px', background: BG_DARK, borderRadius: 6, border: `1px solid ${BORDER}` }}>
                 <div style={rowS}>
                   <span style={labelS}>Col. Aceleración</span>
                   <input type="number" min={1} max={20} value={accelCol}
@@ -202,35 +170,31 @@ function FileConfigModal({ rawLines, onApply, onCancel, unitFactor }) {
             )}
 
             <div style={{ borderTop: `1px solid ${BORDER}`, margin: '8px 0' }}></div>
-
-            {/* Parámetros */}
-            <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' }}>Parámetros</div>
-
+            <div style={secS}>Parámetros</div>
             <div style={rowS}>
               <span style={labelS}>Time Step dt (s)</span>
               <input type="number" min={0.00001} step={0.001} value={manualDt}
                 onChange={e => setManualDt(parseFloat(e.target.value) || 0.01)}
-                style={inp({ width: 90, textAlign: 'right' })} />
+                style={inp({ width: 100, textAlign: 'right' })} />
+              {d.dtDetected && manualDt === d.dt && (
+                <span style={{ fontSize: 9, color: '#3FB950' }}>auto</span>
+              )}
             </div>
-
             <div style={rowS}>
               <span style={labelS}>Scaling Factor</span>
               <input type="number" min={0.00001} step={0.1} value={scaleFactor}
                 onChange={e => setScaleFactor(parseFloat(e.target.value) || 1)}
-                style={inp({ width: 90, textAlign: 'right' })} />
+                style={inp({ width: 100, textAlign: 'right' })} />
             </div>
           </div>
 
-          {/* Columna derecha: Preview */}
+          {/* Preview */}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' }}>
-              Vista previa (líneas {userStart + 1} a {Math.min(userStart + 10, rawLines.length)})
-            </div>
+            <div style={secS}>Vista previa</div>
             <div style={{
               background: BG_DARK, border: `1px solid ${BORDER}`, borderRadius: 6,
               padding: 8, fontFamily: 'monospace', fontSize: 11, color: '#8B949E',
-              maxHeight: 300, overflowY: 'auto', overflowX: 'auto', whiteSpace: 'pre',
-              lineHeight: 1.7,
+              maxHeight: 320, overflowY: 'auto', overflowX: 'auto', whiteSpace: 'pre', lineHeight: 1.7,
             }}>
               {preview.map(p => (
                 <div key={p.num}>
@@ -240,21 +204,19 @@ function FileConfigModal({ rawLines, onApply, onCancel, unitFactor }) {
               ))}
             </div>
             <div style={{ fontSize: 10, color: '#484F58', marginTop: 4 }}>
-              Columnas detectadas: ~{detected.nCols} · Formato sugerido: {FORMAT_TYPES.find(f => f.id === detected.format)?.label}
+              {d.nCols || '?'} columnas detectadas · Formato sugerido: {FORMAT_TYPES.find(f => f.id === d.format)?.label || '?'}
             </div>
           </div>
         </div>
 
         {/* Botones */}
         <div style={{ display: 'flex', gap: 10, marginTop: 14, justifyContent: 'flex-end' }}>
-          <button onClick={onCancel} style={{
-            padding: '8px 20px', borderRadius: 5, border: `1px solid ${BORDER}`,
-            background: '#21262D', color: '#8B949E', fontSize: 13, cursor: 'pointer'
-          }}>Cancelar</button>
-          <button onClick={handleOK} style={{
-            padding: '8px 24px', borderRadius: 5, border: 'none',
-            background: ACCENT, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer'
-          }}>OK</button>
+          <button onClick={onCancel} style={{ padding: '8px 20px', borderRadius: 5, border: `1px solid ${BORDER}`, background: '#21262D', color: '#8B949E', fontSize: 13, cursor: 'pointer' }}>
+            Cancelar
+          </button>
+          <button onClick={handleOK} style={{ padding: '8px 28px', borderRadius: 5, border: 'none', background: ACCENT, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            OK
+          </button>
         </div>
       </div>
     </div>
@@ -283,12 +245,9 @@ export default function EjemploEspectro() {
 
   const unitFactor = UNIT_OPTIONS[unitIdx].factor !== null ? UNIT_OPTIONS[unitIdx].factor : customFactor
 
-  // -----------------------------------------------------------------------
   const handleCalculate = useCallback(async () => {
     const { accel, dt } = seismic.parsedRef.current
-    if (!accel || !dt) {
-      seismic.setStatus({ type: 'error', msg: 'Cargue un registro sísmico primero.' }); return
-    }
+    if (!accel || !dt) { seismic.setStatus({ type: 'error', msg: 'Cargue un registro sísmico primero.' }); return }
     setLoading(true)
     seismic.setStatus({ type: 'info', msg: `Calculando... (${accel.length.toLocaleString()} pts)` })
     try {
@@ -318,16 +277,16 @@ export default function EjemploEspectro() {
   const canCalc = !!seismic.parsedRef.current.accel && ready && !loading
   const { status } = seismic
 
-  // -----------------------------------------------------------------------
   return (
     <div style={{ minHeight: '100vh', background: BG_DARK, color: '#E6EDF3', fontFamily: "'Inter',system-ui,sans-serif", display: 'flex', flexDirection: 'column' }}>
 
       {/* Modal */}
-      {seismic.showModal && (
+      {seismic.showModal && seismic.rawLines.length > 0 && (
         <FileConfigModal
           rawLines={seismic.rawLines}
+          detectedConfig={seismic.detectedConfig}
           unitFactor={unitFactor}
-          onApply={(config) => seismic.applyConfig(config)}
+          onApply={config => seismic.applyConfig(config)}
           onCancel={() => seismic.setShowModal(false)}
         />
       )}
@@ -367,9 +326,9 @@ export default function EjemploEspectro() {
 
           {/* [1] Archivo */}
           <section>
-            <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[1] Registro Sísmico (.txt)</div>
+            <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[1] Registro Sísmico</div>
             <label style={{ display: 'block', border: `1px dashed ${BORDER}`, borderRadius: 6, padding: '9px', cursor: 'pointer', textAlign: 'center', fontSize: 13, color: seismic.fileName ? '#E6EDF3' : '#555', background: BG_DARK }}>
-              <input type="file" accept=".txt,.csv,.dat" onChange={seismic.handleFile} style={{ display: 'none' }} />
+              <input type="file" accept=".txt,.csv,.dat,.at2,.smc" onChange={seismic.handleFile} style={{ display: 'none' }} />
               {seismic.fileName || 'Explorar archivo...'}
             </label>
 
@@ -378,17 +337,17 @@ export default function EjemploEspectro() {
                 <div style={{ color: '#3FB950' }}>
                   ✓ {seismic.fileInfo.npts.toLocaleString()} pts · {FORMAT_TYPES.find(f => f.id === seismic.fileInfo.format)?.label}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
-                  <span style={{ fontSize: 11, color: '#8B949E' }}>dt =</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: seismic.fileInfo.dtDetected ? '#3FB950' : ACCENT }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                  <span style={{ color: '#8B949E' }}>dt =</span>
+                  <span style={{ fontWeight: 600, color: seismic.fileInfo.dtDetected ? '#3FB950' : ACCENT }}>
                     {seismic.fileInfo.dt} s
                   </span>
                   <span style={{ fontSize: 10, color: '#555' }}>
-                    {seismic.fileInfo.dtDetected ? '(detectado)' : '(manual)'}
+                    {seismic.fileInfo.dtDetected ? '(auto)' : '(manual)'}
                   </span>
                 </div>
                 <button onClick={() => seismic.setShowModal(true)} style={{
-                  marginTop: 6, width: '100%', padding: '5px', borderRadius: 4,
+                  marginTop: 5, width: '100%', padding: '5px', borderRadius: 4,
                   border: `1px solid ${BORDER}`, background: '#21262D', color: '#8B949E',
                   fontSize: 11, cursor: 'pointer'
                 }}>Reconfigurar archivo...</button>
@@ -396,7 +355,6 @@ export default function EjemploEspectro() {
             )}
           </section>
 
-          {/* Toggle móvil */}
           {mobile && (
             <button onClick={() => setShowParams(!showParams)} style={{ background: 'transparent', border: `1px solid ${BORDER}`, color: ACCENT, borderRadius: 5, padding: '7px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
               {showParams ? '▲ Ocultar parámetros' : '▼ Configurar parámetros'}
@@ -405,7 +363,6 @@ export default function EjemploEspectro() {
 
           {(showParams || !mobile) && <>
 
-            {/* [2] Unidades */}
             <section>
               <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[2] Unidades</div>
               <select value={unitIdx} onChange={e => setUnitIdx(Number(e.target.value))} style={inp({ width: '100%' })}>
@@ -421,7 +378,6 @@ export default function EjemploEspectro() {
               )}
             </section>
 
-            {/* [3] Amortiguamiento */}
             <section>
               <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[3] Amortiguamiento</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
@@ -447,7 +403,6 @@ export default function EjemploEspectro() {
               </div>
             </section>
 
-            {/* [4] Newmark */}
             <section>
               <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[4] Newmark-Beta</div>
               <select value={newmarkType} onChange={e => setNewmarkType(Number(e.target.value))} style={inp({ width: '100%' })}>
@@ -459,7 +414,6 @@ export default function EjemploEspectro() {
               </div>
             </section>
 
-            {/* [5] Rango */}
             <section>
               <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[5] Rango del Espectro</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 10px' }}>
@@ -479,7 +433,6 @@ export default function EjemploEspectro() {
             </section>
           </>}
 
-          {/* Calcular */}
           <button onClick={handleCalculate} disabled={!canCalc} style={{
             width: '100%', padding: mobile ? '12px' : '10px', borderRadius: 6, border: 'none',
             background: canCalc ? ACCENT : '#21262D', color: canCalc ? '#fff' : '#555',
