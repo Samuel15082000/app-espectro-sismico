@@ -1,19 +1,20 @@
 // =============================================================================
 //  EjemploEspectro.jsx  —  INERTIX Espectro de Respuesta Sísmica
-//  SOLO diseño visual — la lógica está en useSeismic.js y useNewmark.js
+//  Con ventana modal de configuración de archivo
 //  Requiere: recharts  (npm install recharts)
 // =============================================================================
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useNewmark } from './useNewmark'
-import { useSeismic, exportTxt } from './useSeismic'
+import {
+  useSeismic, exportTxt, detectDataRange, autoDetectFormat,
+  FORMAT_TYPES, DECIMAL_SEPS, COL_SEPS
+} from './useSeismic'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 
-// ---------------------------------------------------------------------------
-//  Constantes de UI
 // ---------------------------------------------------------------------------
 const UNIT_OPTIONS = [
   { label: 'cm/s²', factor: 1 },
@@ -27,6 +28,7 @@ const ACCENT   = '#E97817'
 const BG_DARK  = '#111318'
 const BG_PANEL = '#181B22'
 const BORDER   = '#2A2D35'
+const BG_MODAL = '#1E2128'
 
 function useIsMobile(bp = 768) {
   const [m, setM] = useState(window.innerWidth < bp)
@@ -43,12 +45,230 @@ const inp = (extra) => ({
 })
 const tp = { contentStyle: { background: BG_PANEL, border: `1px solid ${BORDER}`, borderRadius: 5, fontSize: 11 } }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
+//  MODAL DE CONFIGURACIÓN DE ARCHIVO
+// =============================================================================
+function FileConfigModal({ rawLines, onApply, onCancel, unitFactor }) {
+  const mobile = useIsMobile()
+
+  // Separadores (primero porque afectan detección)
+  const [colSep,  setColSep]  = useState('space')
+  const [decSep,  setDecSep]  = useState('dot')
+
+  // Detectar rango y formato automáticamente
+  const detected = useMemo(() => {
+    const range = detectDataRange(rawLines, colSep, decSep)
+    const fmt = autoDetectFormat(rawLines, range.start, range.end, colSep, decSep)
+    return { ...range, ...fmt }
+  }, [rawLines, colSep, decSep])
+
+  const [userStart,   setUserStart]   = useState(0)
+  const [userEnd,     setUserEnd]     = useState(0)
+  const [format,      setFormat]      = useState('single')
+  const [accelCol,    setAccelCol]    = useState(2)
+  const [timeCol,     setTimeCol]     = useState(1)
+  const [manualDt,    setManualDt]    = useState(0.01)
+  const [scaleFactor, setScaleFactor] = useState(1.0)
+
+  // Sincronizar con detección automática
+  useEffect(() => {
+    setUserStart(detected.start)
+    setUserEnd(detected.end)
+    setFormat(detected.format)
+    setAccelCol(detected.accelCol)
+    setTimeCol(detected.timeCol)
+  }, [detected])
+
+  // Preview de las primeras líneas
+  const preview = useMemo(() => {
+    const start = Math.max(0, userStart)
+    const end = Math.min(rawLines.length - 1, start + 9)
+    return rawLines.slice(start, end + 1).map((line, i) => ({
+      num: start + i + 1,
+      text: line
+    }))
+  }, [rawLines, userStart])
+
+  const handleOK = () => {
+    onApply({
+      userStart, userEnd, format, accelCol, timeCol,
+      colSep, decSep, scaleFactor, manualDt, unitFactor,
+    })
+  }
+
+  const mw = mobile ? '95vw' : 680
+  const labelS = { fontSize: 11, color: '#8B949E', minWidth: mobile ? 80 : 120 }
+  const rowS = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }
+
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center',
+      justifyContent: 'center', zIndex: 1000, padding: 12,
+    }}>
+      <div style={{
+        background: BG_MODAL, border: `1px solid ${BORDER}`, borderRadius: 10,
+        width: mw, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto',
+        padding: mobile ? 14 : 20, color: '#E6EDF3',
+      }}>
+
+        {/* Título */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: ACCENT }}>Configuración del Archivo</div>
+            <div style={{ fontSize: 11, color: '#8B949E', marginTop: 2 }}>
+              {rawLines.length.toLocaleString()} líneas totales · Auto-detectado: línea {detected.start + 1} a {detected.end + 1}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: mobile ? 'column' : 'row', gap: 16 }}>
+
+          {/* Columna izquierda: Configuración */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+
+            {/* Separadores */}
+            <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' }}>Separadores</div>
+
+            <div style={rowS}>
+              <span style={labelS}>Decimal</span>
+              <select value={decSep} onChange={e => setDecSep(e.target.value)} style={inp({ flex: 1 })}>
+                {DECIMAL_SEPS.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
+              </select>
+            </div>
+
+            <div style={rowS}>
+              <span style={labelS}>Columnas</span>
+              <select value={colSep} onChange={e => setColSep(e.target.value)} style={inp({ flex: 1 })}>
+                {COL_SEPS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+            </div>
+
+            <div style={{ borderTop: `1px solid ${BORDER}`, margin: '8px 0' }}></div>
+
+            {/* Rango de líneas */}
+            <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' }}>Rango de Datos</div>
+
+            <div style={rowS}>
+              <span style={labelS}>Línea inicio</span>
+              <input type="number" min={1} max={rawLines.length}
+                value={userStart + 1}
+                onChange={e => setUserStart(Math.max(0, Number(e.target.value) - 1))}
+                style={inp({ width: 80, textAlign: 'right' })} />
+            </div>
+
+            <div style={rowS}>
+              <span style={labelS}>Línea fin</span>
+              <input type="number" min={userStart + 1} max={rawLines.length}
+                value={userEnd + 1}
+                onChange={e => setUserEnd(Math.max(userStart, Number(e.target.value) - 1))}
+                style={inp({ width: 80, textAlign: 'right' })} />
+            </div>
+
+            <div style={{ borderTop: `1px solid ${BORDER}`, margin: '8px 0' }}></div>
+
+            {/* Formato */}
+            <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' }}>Formato del Archivo</div>
+
+            {FORMAT_TYPES.map(f => (
+              <label key={f.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6,
+                cursor: 'pointer', fontSize: 12, color: format === f.id ? '#E6EDF3' : '#8B949E'
+              }}>
+                <input type="radio" name="format" value={f.id}
+                  checked={format === f.id}
+                  onChange={() => setFormat(f.id)}
+                  style={{ accentColor: ACCENT }} />
+                {f.label}
+              </label>
+            ))}
+
+            {/* Selector de columnas (solo para multi_col y time_accel) */}
+            {(format === 'multi_col' || format === 'time_accel') && (
+              <div style={{ marginTop: 6, padding: '8px 10px', background: BG_DARK, borderRadius: 6, border: `1px solid ${BORDER}` }}>
+                <div style={rowS}>
+                  <span style={labelS}>Col. Aceleración</span>
+                  <input type="number" min={1} max={20} value={accelCol}
+                    onChange={e => setAccelCol(Math.max(1, Number(e.target.value)))}
+                    style={inp({ width: 55, textAlign: 'right' })} />
+                </div>
+                <div style={rowS}>
+                  <span style={labelS}>Col. Tiempo</span>
+                  <input type="number" min={1} max={20} value={timeCol}
+                    onChange={e => setTimeCol(Math.max(1, Number(e.target.value)))}
+                    style={inp({ width: 55, textAlign: 'right' })} />
+                </div>
+              </div>
+            )}
+
+            <div style={{ borderTop: `1px solid ${BORDER}`, margin: '8px 0' }}></div>
+
+            {/* Parámetros */}
+            <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' }}>Parámetros</div>
+
+            <div style={rowS}>
+              <span style={labelS}>Time Step dt (s)</span>
+              <input type="number" min={0.00001} step={0.001} value={manualDt}
+                onChange={e => setManualDt(parseFloat(e.target.value) || 0.01)}
+                style={inp({ width: 90, textAlign: 'right' })} />
+            </div>
+
+            <div style={rowS}>
+              <span style={labelS}>Scaling Factor</span>
+              <input type="number" min={0.00001} step={0.1} value={scaleFactor}
+                onChange={e => setScaleFactor(parseFloat(e.target.value) || 1)}
+                style={inp({ width: 90, textAlign: 'right' })} />
+            </div>
+          </div>
+
+          {/* Columna derecha: Preview */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' }}>
+              Vista previa (líneas {userStart + 1} a {Math.min(userStart + 10, rawLines.length)})
+            </div>
+            <div style={{
+              background: BG_DARK, border: `1px solid ${BORDER}`, borderRadius: 6,
+              padding: 8, fontFamily: 'monospace', fontSize: 11, color: '#8B949E',
+              maxHeight: 300, overflowY: 'auto', overflowX: 'auto', whiteSpace: 'pre',
+              lineHeight: 1.7,
+            }}>
+              {preview.map(p => (
+                <div key={p.num}>
+                  <span style={{ color: '#484F58', display: 'inline-block', width: 36, textAlign: 'right', marginRight: 8 }}>{p.num}</span>
+                  <span style={{ color: '#E6EDF3' }}>{p.text || '(vacía)'}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 10, color: '#484F58', marginTop: 4 }}>
+              Columnas detectadas: ~{detected.nCols} · Formato sugerido: {FORMAT_TYPES.find(f => f.id === detected.format)?.label}
+            </div>
+          </div>
+        </div>
+
+        {/* Botones */}
+        <div style={{ display: 'flex', gap: 10, marginTop: 14, justifyContent: 'flex-end' }}>
+          <button onClick={onCancel} style={{
+            padding: '8px 20px', borderRadius: 5, border: `1px solid ${BORDER}`,
+            background: '#21262D', color: '#8B949E', fontSize: 13, cursor: 'pointer'
+          }}>Cancelar</button>
+          <button onClick={handleOK} style={{
+            padding: '8px 24px', borderRadius: 5, border: 'none',
+            background: ACCENT, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer'
+          }}>OK</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// =============================================================================
+//  COMPONENTE PRINCIPAL
+// =============================================================================
 export default function EjemploEspectro() {
   const { ready, loadError, computeSpectrum } = useNewmark()
   const mobile = useIsMobile()
+  const seismic = useSeismic()
 
-  // Parámetros de cálculo
   const [unitIdx,      setUnitIdx]      = useState(0)
   const [customFactor, setCustomFactor] = useState(1)
   const [newmarkType,  setNewmarkType]  = useState(0)
@@ -57,57 +277,38 @@ export default function EjemploEspectro() {
   const [nPeriods,     setNPeriods]     = useState(1000)
   const [TMin,         setTMin]         = useState(0.01)
   const [TMax,         setTMax]         = useState(10.0)
-  const [manualDt,     setManualDt]     = useState(0.01)
   const [showParams,   setShowParams]   = useState(true)
-
-  // Resultados
-  const [result,  setResult]  = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [result,       setResult]       = useState(null)
+  const [loading,      setLoading]      = useState(false)
 
   const unitFactor = UNIT_OPTIONS[unitIdx].factor !== null ? UNIT_OPTIONS[unitIdx].factor : customFactor
 
-  // Hook de lógica sísmica
-  const seismic = useSeismic({ unitFactor, manualDt })
-
-  // -------------------------------------------------------------------------
-  //  Calcular espectro
-  // -------------------------------------------------------------------------
+  // -----------------------------------------------------------------------
   const handleCalculate = useCallback(async () => {
     const { accel, dt } = seismic.parsedRef.current
     if (!accel || !dt) {
-      seismic.setStatus({ type: 'error', msg: 'Cargue un registro sísmico primero.' })
-      return
+      seismic.setStatus({ type: 'error', msg: 'Cargue un registro sísmico primero.' }); return
     }
     setLoading(true)
     seismic.setStatus({ type: 'info', msg: `Calculando... (${accel.length.toLocaleString()} pts)` })
-
     try {
       const xiArr = dampings.slice(0, nCurves).map(d => d / 100)
       const { periods, Sa, error } = await computeSpectrum({
-        accel: Float64Array.from(accel), dt,
-        dampings: xiArr, newmarkType, nPeriods, TMin, TMax,
+        accel: Float64Array.from(accel), dt, dampings: xiArr, newmarkType, nPeriods, TMin, TMax,
       })
-
-      if (error) {
-        seismic.setStatus({ type: 'error', msg: `Error WASM: ${error}` })
-      } else {
+      if (error) { seismic.setStatus({ type: 'error', msg: `Error WASM: ${error}` }) }
+      else {
         const chartData = Array.from(periods, (T, i) => {
           const pt = { T: parseFloat(T.toFixed(4)) }
-          Sa.forEach((c, j) => { pt[`xi${j}`] = parseFloat(c[i].toFixed(3)) })
-          return pt
+          Sa.forEach((c, j) => { pt[`xi${j}`] = parseFloat(c[i].toFixed(3)) }); return pt
         })
         setResult({ chartData, periods, Sa, dampings: dampings.slice(0, nCurves) })
         seismic.setStatus({ type: 'success', msg: `Listo. ${periods.length} periodos · ${nCurves} curvas.` })
       }
-    } catch (err) {
-      seismic.setStatus({ type: 'error', msg: `Error: ${err.message}` })
-    }
+    } catch (err) { seismic.setStatus({ type: 'error', msg: `Error: ${err.message}` }) }
     setLoading(false)
   }, [computeSpectrum, dampings, nCurves, newmarkType, nPeriods, TMin, TMax, seismic])
 
-  // -------------------------------------------------------------------------
-  //  Amortiguamiento
-  // -------------------------------------------------------------------------
   const handleNCurves = (n) => {
     n = Math.max(1, Math.min(5, n)); setNCurves(n)
     setDampings(p => n > p.length ? [...p, ...DEFAULT_DAMPINGS.slice(p.length, n)] : p.slice(0, n))
@@ -117,11 +318,19 @@ export default function EjemploEspectro() {
   const canCalc = !!seismic.parsedRef.current.accel && ready && !loading
   const { status } = seismic
 
-  // -------------------------------------------------------------------------
-  //  Render
-  // -------------------------------------------------------------------------
+  // -----------------------------------------------------------------------
   return (
     <div style={{ minHeight: '100vh', background: BG_DARK, color: '#E6EDF3', fontFamily: "'Inter',system-ui,sans-serif", display: 'flex', flexDirection: 'column' }}>
+
+      {/* Modal */}
+      {seismic.showModal && (
+        <FileConfigModal
+          rawLines={seismic.rawLines}
+          unitFactor={unitFactor}
+          onApply={(config) => seismic.applyConfig(config)}
+          onCancel={() => seismic.setShowModal(false)}
+        />
+      )}
 
       {/* Header */}
       <header style={{ background: BG_PANEL, borderBottom: `1px solid ${BORDER}`, padding: mobile ? '8px 12px' : '9px 20px', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
@@ -160,47 +369,29 @@ export default function EjemploEspectro() {
           <section>
             <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[1] Registro Sísmico (.txt)</div>
             <label style={{ display: 'block', border: `1px dashed ${BORDER}`, borderRadius: 6, padding: '9px', cursor: 'pointer', textAlign: 'center', fontSize: 13, color: seismic.fileName ? '#E6EDF3' : '#555', background: BG_DARK }}>
-              <input type="file" accept=".txt" onChange={seismic.handleFile} style={{ display: 'none' }} />
+              <input type="file" accept=".txt,.csv,.dat" onChange={seismic.handleFile} style={{ display: 'none' }} />
               {seismic.fileName || 'Explorar archivo...'}
             </label>
 
-            {seismic.rawLines.length > 0 && (
+            {seismic.fileInfo && (
               <div style={{ marginTop: 6, fontSize: 11 }}>
-                <span style={{ color: '#8B949E' }}>Total: {seismic.rawLines.length} líneas</span>
-                {seismic.detectedRange && (
-                  <div style={{ color: '#3FB950', marginTop: 2 }}>
-                    Auto-detectado: {seismic.detectedRange.start + 1} a {seismic.detectedRange.end + 1}
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: 8, marginTop: 5 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 10, color: '#8B949E', marginBottom: 2 }}>Línea inicio</div>
-                    <input type="number" min={1} max={seismic.rawLines.length}
-                      value={seismic.userStart + 1}
-                      onChange={e => seismic.applyRange(Math.max(0, Number(e.target.value) - 1), seismic.userEnd)}
-                      style={inp({ width: '100%' })} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 10, color: '#8B949E', marginBottom: 2 }}>Línea fin</div>
-                    <input type="number" min={seismic.userStart + 1} max={seismic.rawLines.length}
-                      value={seismic.userEnd + 1}
-                      onChange={e => seismic.applyRange(seismic.userStart, Math.max(seismic.userStart, Number(e.target.value) - 1))}
-                      style={inp({ width: '100%' })} />
-                  </div>
+                <div style={{ color: '#3FB950' }}>
+                  ✓ {seismic.fileInfo.npts.toLocaleString()} pts · {FORMAT_TYPES.find(f => f.id === seismic.fileInfo.format)?.label}
                 </div>
-                {seismic.fileInfo && (
-                  <div style={{ color: '#3FB950', marginTop: 3, fontSize: 11 }}>
-                    ✓ {seismic.fileInfo.npts.toLocaleString()} pts · {seismic.fileInfo.twoColumns ? `2 col · dt=${seismic.fileInfo.dt}s` : '1 col'}
-                  </div>
-                )}
-                {seismic.fileInfo && !seismic.fileInfo.twoColumns && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
-                    <span style={{ fontSize: 10, color: ACCENT }}>dt manual (s)</span>
-                    <input type="number" min={0.0001} step={0.001} value={manualDt}
-                      onChange={e => { const v = parseFloat(e.target.value) || 0.01; setManualDt(v); seismic.applyDt(v) }}
-                      style={inp({ width: 75, textAlign: 'right' })} />
-                  </div>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
+                  <span style={{ fontSize: 11, color: '#8B949E' }}>dt =</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: seismic.fileInfo.dtDetected ? '#3FB950' : ACCENT }}>
+                    {seismic.fileInfo.dt} s
+                  </span>
+                  <span style={{ fontSize: 10, color: '#555' }}>
+                    {seismic.fileInfo.dtDetected ? '(detectado)' : '(manual)'}
+                  </span>
+                </div>
+                <button onClick={() => seismic.setShowModal(true)} style={{
+                  marginTop: 6, width: '100%', padding: '5px', borderRadius: 4,
+                  border: `1px solid ${BORDER}`, background: '#21262D', color: '#8B949E',
+                  fontSize: 11, cursor: 'pointer'
+                }}>Reconfigurar archivo...</button>
               </div>
             )}
           </section>
@@ -217,14 +408,14 @@ export default function EjemploEspectro() {
             {/* [2] Unidades */}
             <section>
               <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[2] Unidades</div>
-              <select value={unitIdx} onChange={e => { setUnitIdx(Number(e.target.value)); seismic.applyUnit(UNIT_OPTIONS[Number(e.target.value)].factor !== null ? UNIT_OPTIONS[Number(e.target.value)].factor : customFactor) }} style={inp({ width: '100%' })}>
+              <select value={unitIdx} onChange={e => setUnitIdx(Number(e.target.value))} style={inp({ width: '100%' })}>
                 {UNIT_OPTIONS.map((u, i) => <option key={i} value={i}>{u.label}</option>)}
               </select>
               {unitIdx === 3 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
                   <span style={{ fontSize: 11, color: '#8B949E' }}>Factor → cm/s²</span>
                   <input type="number" min={0.0001} step={0.01} value={customFactor}
-                    onChange={e => { const v = parseFloat(e.target.value) || 1; setCustomFactor(v); seismic.applyUnit(v) }}
+                    onChange={e => setCustomFactor(parseFloat(e.target.value) || 1)}
                     style={inp({ width: 80, textAlign: 'right' })} />
                 </div>
               )}
@@ -273,9 +464,9 @@ export default function EjemploEspectro() {
               <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[5] Rango del Espectro</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 10px' }}>
                 {[
-                  { label: 'T mín (s)',   val: TMin,    set: setTMin,    step: 0.01 },
-                  { label: 'T máx (s)',   val: TMax,    set: setTMax,    step: 0.5 },
-                  { label: 'N. periodos', val: nPeriods, set: setNPeriods, step: 100 },
+                  { label: 'T mín (s)',   val: TMin,     set: setTMin,     step: 0.01 },
+                  { label: 'T máx (s)',   val: TMax,     set: setTMax,     step: 0.5 },
+                  { label: 'N. periodos', val: nPeriods,  set: setNPeriods, step: 100 },
                 ].map(({ label, val, set, step }) => (
                   <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
                     <span style={{ fontSize: 11, color: '#8B949E', minWidth: 72 }}>{label}</span>
@@ -288,7 +479,7 @@ export default function EjemploEspectro() {
             </section>
           </>}
 
-          {/* Botón calcular */}
+          {/* Calcular */}
           <button onClick={handleCalculate} disabled={!canCalc} style={{
             width: '100%', padding: mobile ? '12px' : '10px', borderRadius: 6, border: 'none',
             background: canCalc ? ACCENT : '#21262D', color: canCalc ? '#fff' : '#555',
@@ -319,7 +510,6 @@ export default function EjemploEspectro() {
         {/* Gráficas */}
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: mobile ? 'visible' : 'hidden', minWidth: 0 }}>
 
-          {/* Acelerograma */}
           <div style={{ flex: 1, minHeight: mobile ? 280 : 0, padding: '8px 12px', display: 'flex', flexDirection: 'column', borderBottom: `1px solid ${BORDER}` }}>
             <div style={{ fontSize: 11, color: '#8B949E', marginBottom: 4 }}>
               Acelerograma {seismic.fileInfo ? `— ${seismic.fileInfo.npts.toLocaleString()} pts · dt=${seismic.fileInfo.dt}s` : ''}
@@ -343,7 +533,6 @@ export default function EjemploEspectro() {
             )}
           </div>
 
-          {/* Espectro */}
           <div style={{ flex: 1, minHeight: mobile ? 300 : 0, padding: '8px 12px', display: 'flex', flexDirection: 'column' }}>
             <div style={{ fontSize: 11, color: '#8B949E', marginBottom: 4 }}>
               Espectro de Pseudoaceleración Sa vs Período T
