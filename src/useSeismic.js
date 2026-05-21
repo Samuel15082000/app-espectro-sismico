@@ -354,7 +354,9 @@ export function exportTxt(periods, Sa, dampings, fileName, newmarkType, unit) {
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
   a.download = 'espectro_respuesta.txt'
+  document.body.appendChild(a)
   a.click()
+  document.body.removeChild(a)
   URL.revokeObjectURL(a.href)
 }
 

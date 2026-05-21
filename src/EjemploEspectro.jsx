@@ -71,7 +71,7 @@ function FileConfigModal({ rawLines, detectedConfig, onApply, onCancel, unitFact
     setAccelCol(d.accelCol || 1)
     setTimeCol(d.timeCol || 1)
     if (d.dtDetected && d.dt > 0) setManualDt(d.dt)
-  }, [d])
+  }, [detectedConfig])
 
   // Preview
   const previewStart = Math.max(0, userStart)
