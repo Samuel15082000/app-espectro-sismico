@@ -56,22 +56,21 @@ export function splitLine(line, colSep, decSep) {
 }
 
 // ---------------------------------------------------------------------------
-//  Clasificador de líneas
-//  Regla: dos o más letras consecutivas = texto/comentario
-//  Excepción: 'e' y 'E' se excluyen del conteo (notación científica 1.23E+04)
+//  Clasificador de líneas — estricto
+//  Rechaza: no-ASCII (α β ≔ ―), cualquier letra salvo e/E, chars de fórmula
 // ---------------------------------------------------------------------------
 function isProbablyNumericLine(line) {
   const s = line.trim()
   if (!s) return false
-  // Marcadores explícitos de comentario
   if (/^[#%!$*\/;]/.test(s)) return false
-  // Dos o más letras NO-e consecutivas → es texto
-  // [a-d f-z] excluye 'e'; [A-D F-Z] excluye 'E'
-  if (/[a-df-zA-DF-Z]{2,}/.test(s)) return false
-  // Debe tener al menos un dígito
+  // No-ASCII → fórmulas, texto especial, binarios
+  if (/[^\x00-\x7F]/.test(s)) return false
+  // Cualquier letra excepto e/E (notación científica)
+  if (/[a-df-zA-DF-Z]/.test(s)) return false
+  // Caracteres de fórmula / ecuación
+  if (/[=<>()\[\]{}_%@&]/.test(s)) return false
   if (!/\d/.test(s)) return false
-  // Intentar parsear al menos un número real
-  const norm = s.replace(/[,;]/g, ' ').replace(/[^\d.\+\-\sEe]/g, ' ')
+  const norm = s.replace(/[,;]/g, ' ')
   return norm.trim().split(/\s+/).some(p => p !== '' && !isNaN(Number(p)))
 }
 
@@ -427,11 +426,27 @@ export function useSeismic() {
     setFileName(file.name); setAccelChart(null); setFileInfo(null)
     setStatus(null); parsedRef.current = { accel: null, dt: null }
 
+    // Rechazar tipos binarios/no-texto antes de leer
+    const badType = /^(image|audio|video)\//.test(file.type)
+      || ['application/pdf', 'application/msword',
+          'application/vnd.', 'application/zip',
+          'application/x-'].some(p => file.type.startsWith(p))
+    const badExt = /\.(png|jpg|jpeg|gif|bmp|webp|svg|pdf|docx?|xlsx?|zip|rar|exe|bin)$/i.test(file.name)
+    if (badType || badExt) {
+      setStatus({ type: 'error', msg: `El archivo "${file.name}" no es un archivo de texto. Solo se aceptan archivos .txt, .csv o similares.` })
+      return
+    }
+
     const reader = new FileReader()
     reader.onload = (ev) => {
       const lines = ev.target.result.split(/\r?\n/)
       setRawLines(lines)
-      setDetectedConfig(autoDetectAll(lines))
+      const detected = autoDetectAll(lines)
+      if (detected.blocks.length === 0) {
+        setStatus({ type: 'error', msg: 'No se encontraron datos numéricos en el archivo. Verifica que sea un registro sísmico válido.' })
+        return
+      }
+      setDetectedConfig(detected)
       setShowModal(true)
     }
     reader.readAsText(file)
@@ -467,7 +482,7 @@ export function useSeismic() {
   }, [rawLines])
 
   return {
-    rawLines, fileName, fileInfo, accelChart,
+    rawLines, fileName, fileInfo, accelChart, setAccelChart,
     status, setStatus, parsedRef,
     showModal, setShowModal, detectedConfig,
     handleFile, applyConfig,

@@ -11,6 +11,8 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
+import BaselinePanel from './BaselinePanel'
+import SDOFPanel     from './SDOFPanel'
 
 // ---------------------------------------------------------------------------
 const UNIT_OPTIONS = [
@@ -427,6 +429,8 @@ export default function EjemploEspectro() {
   const [showParams,   setShowParams]   = useState(true)
   const [result,       setResult]       = useState(null)
   const [loading,      setLoading]      = useState(false)
+  const [showBaseline, setShowBaseline] = useState(false)
+  const [showSDOF,     setShowSDOF]     = useState(false)
 
   const unitFactor = UNIT_OPTIONS[unitIdx].factor !== null ? UNIT_OPTIONS[unitIdx].factor : customFactor
 
@@ -459,13 +463,28 @@ export default function EjemploEspectro() {
   }
   const setDamping = (i, v) => setDampings(p => { const d = [...p]; d[i] = parseFloat(v) || 0; return d })
 
+  const handleUseCorrecta = useCallback((correctedAccel, corrDt) => {
+    seismic.parsedRef.current = { accel: correctedAccel, dt: corrDt }
+    const step = Math.max(1, Math.floor(correctedAccel.length / 2000))
+    const chart = []
+    for (let i = 0; i < correctedAccel.length; i += step) {
+      chart.push({
+        t: parseFloat((i * corrDt).toFixed(4)),
+        a: parseFloat(correctedAccel[i].toFixed(6)),
+      })
+    }
+    seismic.setAccelChart(chart)
+    setShowBaseline(false)
+    seismic.setStatus({ type: 'success', msg: 'Señal corregida aplicada. Recalcule el espectro.' })
+  }, [seismic])
+
   const canCalc = !!seismic.parsedRef.current.accel && ready && !loading
   const { status } = seismic
 
   return (
     <div style={{ minHeight: '100vh', background: BG_DARK, color: '#E6EDF3', fontFamily: "'Inter',system-ui,sans-serif", display: 'flex', flexDirection: 'column' }}>
 
-      {/* Modal */}
+      {/* Modal de carga de archivo */}
       {seismic.showModal && seismic.rawLines.length > 0 && (
         <FileConfigModal
           rawLines={seismic.rawLines}
@@ -473,6 +492,27 @@ export default function EjemploEspectro() {
           unitFactor={unitFactor}
           onApply={config => seismic.applyConfig(config)}
           onCancel={() => seismic.setShowModal(false)}
+        />
+      )}
+
+      {/* Panel: Corrección de Línea Base */}
+      {showBaseline && (
+        <BaselinePanel
+          accelArr={seismic.parsedRef.current.accel || []}
+          dt={seismic.parsedRef.current.dt || 0.01}
+          fileName={seismic.fileName}
+          onClose={() => setShowBaseline(false)}
+          onUseCorrecta={handleUseCorrecta}
+        />
+      )}
+
+      {/* Panel: Análisis SDOF No Lineal */}
+      {showSDOF && (
+        <SDOFPanel
+          accelArr={seismic.parsedRef.current.accel || []}
+          dt={seismic.parsedRef.current.dt || 0.01}
+          fileName={seismic.fileName}
+          onClose={() => setShowSDOF(false)}
         />
       )}
 
@@ -624,6 +664,20 @@ export default function EjemploEspectro() {
             fontWeight: 700, fontSize: 13, cursor: canCalc ? 'pointer' : 'not-allowed', letterSpacing: 0.6
           }}>
             {loading ? 'CALCULANDO...' : 'CALCULAR ESPECTRO'}
+          </button>
+
+          <button onClick={() => setShowBaseline(true)} style={{
+            width: '100%', padding: '9px', borderRadius: 6, border: `1px solid ${BORDER}`,
+            background: '#21262D', color: '#C9D1D9', fontWeight: 600, fontSize: 12, cursor: 'pointer', letterSpacing: 0.4
+          }}>
+            Corrección de Línea Base
+          </button>
+
+          <button onClick={() => setShowSDOF(true)} style={{
+            width: '100%', padding: '9px', borderRadius: 6, border: `1px solid ${BORDER}`,
+            background: '#21262D', color: '#C9D1D9', fontWeight: 600, fontSize: 12, cursor: 'pointer', letterSpacing: 0.4
+          }}>
+            Análisis SDOF No Lineal
           </button>
 
           {status && (
