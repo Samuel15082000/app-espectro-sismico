@@ -6,6 +6,7 @@
 //  Ref: Gavin, CEE 541 Duke (NumericalIntegration 2020, BilinearHysteresis 2014)
 //
 //  Correcciones respecto a versión anterior:
+//  - Evaluación de rama dentro del NR sin restricción (plástica→elástica y viceversa)
 //  - Detección de inversión con v[i+1]·v[i] < 0 (ambas velocidades calculadas)
 //  - Detección de fluencia con f_yield = k2·u + (k−k2)·uy·sgn(v) (Gavin ec. 44)
 //  - Corrección de v y a con paso pequeño dt/1e4 tras conmutación (Gavin paso 7)
@@ -100,14 +101,35 @@ export function computeSDOF({
 
       let fTrial = locK * des + locOff
 
-      // Elástica → plástica: se verifica solo cuando estamos en línea C
-      if (uy > 0 && locSign === 0) {
-        if (fTrial > +Fy) {
-          locK = k2;  locOff = A_off;  locSign = 1
-          fTrial = k2 * des + A_off
-        } else if (fTrial < -Fy) {
-          locK = k2;  locOff = B_off;  locSign = -1
-          fTrial = k2 * des + B_off
+      if (uy > 0) {
+        // Evaluación de rama sin restricción (igual que Haukaas stateDetermination)
+        // Desde cualquier rama se puede ir a cualquier otra
+
+        // Plástica → elástica (inversión dentro del NR)
+        if (locSign === 1 && fTrial < k2 * des + A_off - tol) {
+          // Retrocede desde rama A → línea C desde punto actual
+          locK   = k
+          locOff = fel - k * (des - R / (locK + a1N))  // origen desde último punto convergido
+          locOff = fs[i] - k * u[i]                    // origen desde inicio del paso
+          locSign = 0
+          fTrial  = k * des + locOff
+        } else if (locSign === -1 && fTrial > k2 * des + B_off + tol) {
+          // Retrocede desde rama B → línea C desde inicio del paso
+          locK    = k
+          locOff  = fs[i] - k * u[i]
+          locSign = 0
+          fTrial  = k * des + locOff
+        }
+
+        // Elástica → plástica
+        if (locSign === 0) {
+          if (fTrial > +Fy) {
+            locK = k2;  locOff = A_off;  locSign = 1
+            fTrial = k2 * des + A_off
+          } else if (fTrial < -Fy) {
+            locK = k2;  locOff = B_off;  locSign = -1
+            fTrial = k2 * des + B_off
+          }
         }
       }
 
