@@ -2,13 +2,12 @@
 //  computeSDOF.js — INERTIX
 //  Newmark-Beta No Lineal — SDOF
 //
-//  Wrapper:
-//    alpha === 0  → computeSDOF_EP  (código original, probado y funcionando)
-//    alpha  > 0  → computeSDOF_BL  (Haukaas UBC, bilineal con endurecimiento)
-//
-//  Unidades internas: ton · kN · m · s
+//  computeSDOF_EP  → Elastoplástico perfecto (alpha = 0)
+//                    Conmutación DENTRO del loop NR (igual código anterior)
+//  computeSDOF_BL  → Bilineal con endurecimiento (alpha > 0)
+//                    Sin cambios — funcionaba correctamente
 // ============================================================
- 
+
 export const MASS_UNITS = [
   { label: 'ton',       factor: 1.0     },
   { label: 'kg',        factor: 0.001   },
@@ -24,10 +23,17 @@ export const UY_UNITS = [
   { label: 'cm', factor: 0.01 },
   { label: 'm',  factor: 1.0  },
 ]
- 
+
 // ============================================================
 //  SOLVER 1 — Elastoplástico perfecto (alpha = 0)
-//  Código original — probado y funcionando
+//
+//  CLAVE: la conmutación elástica→plástica ocurre DENTRO del
+//  loop NR, en la misma iteración en que se detecta.
+//  La inversión plástica→elástica ocurre PRE-PASO (antes del NR),
+//  usando el estado del paso anterior — igual que el código anterior.
+//
+//  Estado: bSign (0=elástica, 1=plástica+, -1=plástica-)
+//          bK, bOff  → fs = bK·u + bOff
 // ============================================================
 function computeSDOF_EP({
   m, k, xi, betaN, gammaN, dt, u0, v0, uy, ug, tol, maxIter,
@@ -35,42 +41,43 @@ function computeSDOF_EP({
   const n  = ug.length
   const wn = Math.sqrt(k / m)
   const c  = 2.0 * xi * m * wn
- 
+  const Fy = k * uy
+
   const a1N = m / (betaN * dt * dt) + gammaN * c / (betaN * dt)
-  const a2N = m / (betaN * dt)       + c * (gammaN / betaN - 1.0)
+  const a2N = m / (betaN * dt)      + c * (gammaN / betaN - 1.0)
   const a3N = m * (0.5 / betaN - 1.0) + dt * c * (0.5 * gammaN / betaN - 1.0)
- 
+
   const u  = new Float64Array(n)
   const v  = new Float64Array(n)
   const a  = new Float64Array(n)
   const fs = new Float64Array(n)
   const KT = new Float64Array(n).fill(k)
- 
+
   u[0] = u0;  v[0] = v0;  fs[0] = 0.0;  KT[0] = k
   a[0] = (-m * ug[0] - c * v[0] - k * u[0]) / m
- 
-  const Fy    = k * uy
-  const k2    = 0.0
-  const A_off = Fy
-  const B_off = -Fy
- 
-  let bSign = 0
+
+  // Estado persistente de rama
+  let bSign = 0    // 0=elástica, 1=plástica+, -1=plástica-
   let bK    = k
-  let bOff  = 0.0
- 
+  let bOff  = 0.0  // fs = bK·u + bOff  (línea C desde el origen)
+
   let convergedAll = true
- 
+
   for (let i = 0; i < n - 1; i++) {
     const pEff = -m * ug[i + 1] + a1N * u[i] + a2N * v[i] + a3N * a[i]
- 
+
+    // ── PRE-PASO: inversión plástica → elástica ──
+    // Detecta cambio de signo en velocidad respecto a la rama activa
     if (uy > 0 && bSign !== 0) {
       if ((bSign > 0 && v[i] < 0) || (bSign < 0 && v[i] > 0)) {
-        bK    = k
+        // Nuevo origen de línea C desde el punto de giro (u[i], fs[i])
         bOff  = fs[i] - k * u[i]
+        bK    = k
         bSign = 0
       }
     }
- 
+
+    // ── NR con conmutación elástica→plástica DENTRO del loop ──
     let locK    = bK
     let locOff  = bOff
     let locSign = bSign
@@ -78,48 +85,50 @@ function computeSDOF_EP({
     let fel     = fs[i]
     let Kp      = locK + a1N
     let R       = pEff - fel - a1N * des
-    let iter    = 0
- 
-    while (Math.abs(R) > tol && iter < maxIter) {
+
+    for (let iter = 0; iter < maxIter; iter++) {
+      if (Math.abs(R) <= tol) break
+
       des += R / Kp
- 
+
       let fTrial = locK * des + locOff
- 
+
+      // Conmutación elástica → plástica (solo cuando estamos en línea C)
       if (uy > 0 && locSign === 0) {
         if (fTrial > +Fy) {
-          locK = k2;  locOff = A_off;  locSign = 1
-          fTrial = k2 * des + A_off
+          locK = 0.0;  locOff = +Fy;  locSign = 1
+          fTrial = +Fy
         } else if (fTrial < -Fy) {
-          locK = k2;  locOff = B_off;  locSign = -1
-          fTrial = k2 * des + B_off
+          locK = 0.0;  locOff = -Fy;  locSign = -1
+          fTrial = -Fy
         }
       }
- 
+
       fel = fTrial
-      Kp  = locK + a1N
+      Kp  = locK + a1N   // actualiza con la rigidez de la rama nueva
       R   = pEff - fel - a1N * des
-      iter++
     }
- 
-    if (iter >= maxIter) convergedAll = false
- 
+
+    if (Math.abs(R) > tol) convergedAll = false
+
     u[i + 1]  = des
-    KT[i + 1] = locK
     fs[i + 1] = fel
- 
+    KT[i + 1] = locK
+
+    // Actualizar estado de rama
     bK    = locK
     bOff  = locOff
     bSign = locSign
- 
+
     v[i + 1] = gammaN / (betaN * dt) * (u[i + 1] - u[i])
              + (1.0 - gammaN / betaN) * v[i]
-             + dt * (1.0 - 0.5 * gammaN / betaN) * a[i]
- 
+             + dt  * (1.0 - 0.5 * gammaN / betaN) * a[i]
+
     a[i + 1] = (u[i + 1] - u[i]) / (betaN * dt * dt)
              - v[i] / (betaN * dt)
              - (0.5 / betaN - 1.0) * a[i]
   }
- 
+
   let maxU = 0, maxV = 0, maxAbs = 0
   const aAbs = new Float64Array(n)
   for (let i = 0; i < n; i++) {
@@ -128,7 +137,7 @@ function computeSDOF_EP({
     if (Math.abs(v[i])    > maxV)   maxV   = Math.abs(v[i])
     if (Math.abs(aAbs[i]) > maxAbs) maxAbs = Math.abs(aAbs[i])
   }
- 
+
   return {
     u: Array.from(u), v: Array.from(v),
     aRel: Array.from(a), aAbs: Array.from(aAbs), fs: Array.from(fs),
@@ -137,11 +146,10 @@ function computeSDOF_EP({
     convergedAll, T: 2 * Math.PI / wn,
   }
 }
- 
+
 // ============================================================
 //  SOLVER 2 — Bilineal con endurecimiento (alpha > 0)
-//  Haukaas UBC — variable d (desplazamiento de equilibrio)
-//  fs = matK · (u − d)
+//  SIN CAMBIOS — funcionaba correctamente
 // ============================================================
 function computeSDOF_BL({
   m, k, xi, betaN, gammaN, dt, u0, v0, uy, alpha, ug, tol, maxIter,
@@ -149,61 +157,60 @@ function computeSDOF_BL({
   const n  = ug.length
   const wn = Math.sqrt(k / m)
   const c  = 2.0 * xi * m * wn
- 
+
   const a1N = m / (betaN * dt * dt) + gammaN * c / (betaN * dt)
   const a2N = m / (betaN * dt)      + c * (gammaN / betaN - 1.0)
   const a3N = m * (0.5 / betaN - 1.0) + dt * c * (0.5 * gammaN / betaN - 1.0)
- 
+
   const u  = new Float64Array(n)
   const v  = new Float64Array(n)
   const a  = new Float64Array(n)
   const fs = new Float64Array(n)
   const KT = new Float64Array(n).fill(k)
- 
+
   u[0] = u0;  v[0] = v0;  fs[0] = 0.0;  KT[0] = k
   a[0] = (-m * ug[0] - c * v[0] - k * u[0]) / m
- 
+
   const Khi = k
   const Klo = alpha * k
   const xy  = uy
- 
+
   let matK = Khi
   let d    = 0.0
- 
+
   let convergedAll = true
- 
+
   for (let i = 0; i < n - 1; i++) {
     const pEff = -m * ug[i + 1] + a1N * u[i] + a2N * v[i] + a3N * a[i]
- 
+
     let locK = matK
     let locD = d
     let des  = u[i]
     let converged = false
- 
+
     for (let iter = 0; iter < maxIter; iter++) {
       const Fmat     = locK * (des - locD)
       const Residual = Fmat + a1N * des - pEff
       if (Math.abs(Residual) < tol) { converged = true; break }
       des -= Residual / (locK + a1N)
     }
- 
+
     if (!converged) convergedAll = false
- 
+
     u[i + 1]  = des
     fs[i + 1] = locK * (des - locD)
     KT[i + 1] = locK
- 
+
     v[i + 1] = gammaN / (betaN * dt) * (u[i + 1] - u[i])
              + (1.0 - gammaN / betaN) * v[i]
              + dt  * (1.0 - 0.5 * gammaN / betaN) * a[i]
- 
+
     a[i + 1] = (u[i + 1] - u[i]) / (betaN * dt * dt)
              - v[i] / (betaN * dt)
              - (0.5 / betaN - 1.0) * a[i]
- 
+
     let switched = false
- 
-    // Paso 5 Haukaas: fluencia (Khi → Klo)
+
     if (locK === Khi) {
       const fYield = Klo * u[i + 1] + (Khi - Klo) * xy * Math.sign(v[i + 1])
       const fCurr  = locK * (u[i + 1] - locD)
@@ -213,24 +220,22 @@ function computeSDOF_BL({
         locK = Klo;  locD = (Khi / Klo - 1.0) * xy;  switched = true
       }
     }
- 
-    // Paso 6 Haukaas: inversión (Klo → Khi)
+
     if (!switched && locK === Klo && v[i + 1] * v[i] < 0) {
       locD = u[i + 1] - (Klo / Khi) * (u[i + 1] - locD)
       locK = Khi;  switched = true
     }
- 
-    // Paso 7 Haukaas: actualizar fs y a si hubo conmutación
+
     if (switched) {
       fs[i + 1] = locK * (u[i + 1] - locD)
       KT[i + 1] = locK
       a[i + 1]  = (-m * ug[i + 1] - c * v[i + 1] - fs[i + 1]) / m
     }
- 
+
     matK = locK
     d    = locD
   }
- 
+
   let maxU = 0, maxV = 0, maxAbs = 0
   const aAbs = new Float64Array(n)
   for (let i = 0; i < n; i++) {
@@ -239,7 +244,7 @@ function computeSDOF_BL({
     if (Math.abs(v[i])    > maxV)   maxV   = Math.abs(v[i])
     if (Math.abs(aAbs[i]) > maxAbs) maxAbs = Math.abs(aAbs[i])
   }
- 
+
   return {
     u: Array.from(u), v: Array.from(v),
     aRel: Array.from(a), aAbs: Array.from(aAbs), fs: Array.from(fs),
@@ -248,9 +253,9 @@ function computeSDOF_BL({
     convergedAll, T: 2 * Math.PI / wn,
   }
 }
- 
+
 // ============================================================
-//  WRAPPER
+//  WRAPPER — elige el solver según alpha
 // ============================================================
 export function computeSDOF({
   m, k, xi,
@@ -269,9 +274,9 @@ export function computeSDOF({
     ? computeSDOF_EP(args)
     : computeSDOF_BL(args)
 }
- 
+
 // ============================================================
-//  EXPORTAR TXT
+//  EXPORTAR TXT — sin cambios
 // ============================================================
 export function exportSDOFTxt(result, dt, params, fileName, units) {
   const { m, k, xi, uy, alpha } = params
