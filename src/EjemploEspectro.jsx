@@ -470,16 +470,6 @@ export default function EjemploEspectro() {
 
   const unitFactor = UNIT_OPTIONS[unitIdx].factor !== null ? UNIT_OPTIONS[unitIdx].factor : customFactor
 
-  const prevUnitFactor = useRef(unitFactor)
-  useEffect(() => {
-    if (prevUnitFactor.current === unitFactor) return
-    prevUnitFactor.current = unitFactor
-    if (seismic.parsedRef.current.accelRaw?.length) {
-      seismic.rescaleAccel(unitFactor)
-      if (result) setStaleResult(true)
-    }
-  }, [unitFactor])
-
   const handleCalculate = useCallback(async () => {
     const { accel, dt } = seismic.parsedRef.current
     if (!accel || !dt) { seismic.setStatus({ type: 'error', msg: 'Cargue un registro sísmico primero.' }); return }
