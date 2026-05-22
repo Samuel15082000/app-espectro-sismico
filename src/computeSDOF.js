@@ -126,12 +126,14 @@ export function computeSDOF({
         if (v[i + 1] > 0 && fCurr > fYield) {
           // Fluencia positiva
           locK = Klo
-          locD = (1.0 - Khi / Klo) * xy
+          // alpha=0 → Klo=0: d se fija en +xy (elastoplástico perfecto)
+          locD = (Klo > 0) ? (1.0 - Khi / Klo) * xy : xy
           switched = true
         } else if (v[i + 1] < 0 && fCurr < fYield) {
           // Fluencia negativa
           locK = Klo
-          locD = (Khi / Klo - 1.0) * xy
+          // alpha=0 → Klo=0: d se fija en -xy (elastoplástico perfecto)
+          locD = (Klo > 0) ? (Khi / Klo - 1.0) * xy : -xy
           switched = true
         }
       }
