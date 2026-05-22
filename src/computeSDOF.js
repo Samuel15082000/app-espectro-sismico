@@ -2,26 +2,23 @@
 //  computeSDOF.js — INERTIX
 //  Newmark-Beta No Lineal — SDOF Bilineal (modelo bilineal no degradante)
 //
-//  Algoritmo: Newmark-Beta + conmutación de ramas post-paso (Gavin, pasos 5-7)
-//  Ref: Gavin, CEE 541 Duke (NumericalIntegration 2020, BilinearHysteresis 2014)
+//  Algoritmo: Haukaas (UBC) adaptado a JS
+//  Ref: Gavin, CEE 541 Duke (NumericalIntegration 2020)
+//       Haukaas, UBC (nonlinearDynamicSDOFAnalysis)
 //
-//  Correcciones respecto a versión anterior:
-//  - Evaluación de rama dentro del NR sin restricción (plástica→elástica y viceversa)
-//  - Detección de inversión con v[i+1]·v[i] < 0 (ambas velocidades calculadas)
-//  - Detección de fluencia con f_yield = k2·u + (k−k2)·uy·sgn(v) (Gavin ec. 44)
-//  - Corrección de v y a con paso pequeño dt/1e4 tras conmutación (Gavin paso 7)
+//  Estado del material bilineal mediante:
+//    matK  → rigidez activa (Khi elástica, Klo post-fluencia)
+//    d     → desplazamiento de equilibrio (Haukaas)
+//    R_mat = matK · (u − d)   fuerza restauradora
 //
-//  Línea A (plástica positiva): fs = k2·u + Fy·(1−α)
-//  Línea B (plástica negativa): fs = k2·u − Fy·(1−α)
-//  Línea C (descarga elástica): fs = k·u + (Rt − k·xt)  ← varía por punto de giro
+//  Conmutación (Haukaas pasos 5 y 6):
+//    Fluencia +:  K=Khi, K·(u-d)>f_yield, v>0  →  K=Klo, d=(1-Khi/Klo)·xy
+//    Fluencia -:  K=Khi, K·(u-d)<f_yield, v<0  →  K=Klo, d=(Khi/Klo-1)·xy
+//    Inversión:   K=Klo, v[i+1]·v[i]<0         →  K=Khi, d=u[i+1]-(Klo/Khi)·(u[i+1]-d)
 //
 //  Unidades internas: ton · kN · m · s
-//    m   → ton        k   → kN/m
-//    ug  → m/s²       u   → m
-//    fs  → kN         v   → m/s
 // ============================================================
 
-// Conversores de unidades para la entrada
 export const MASS_UNITS = [
   { label: 'ton',       factor: 1.0     },
   { label: 'kg',        factor: 0.001   },
@@ -44,9 +41,9 @@ export function computeSDOF({
   gammaN = 0.5,
   dt,
   u0 = 0, v0 = 0,
-  uy,           // desplazamiento de fluencia [m]
-  alpha = 0.0,  // endurecimiento post-fluencia (0 = elastoplástico perfecto)
-  ug,           // array de aceleración del suelo [m/s²]
+  uy,
+  alpha = 0.0,
+  ug,
   tol     = 1e-6,
   maxIter = 50,
 }) {
@@ -54,8 +51,9 @@ export function computeSDOF({
   const wn = Math.sqrt(k / m)
   const c  = 2.0 * xi * m * wn
 
+  // Constantes Newmark-Beta
   const a1N = m / (betaN * dt * dt) + gammaN * c / (betaN * dt)
-  const a2N = m / (betaN * dt)       + c * (gammaN / betaN - 1.0)
+  const a2N = m / (betaN * dt)      + c * (gammaN / betaN - 1.0)
   const a3N = m * (0.5 / betaN - 1.0) + dt * c * (0.5 * gammaN / betaN - 1.0)
 
   const u  = new Float64Array(n)
@@ -67,138 +65,98 @@ export function computeSDOF({
   u[0] = u0;  v[0] = v0;  fs[0] = 0.0;  KT[0] = k
   a[0] = (-m * ug[0] - c * v[0] - k * u[0]) / m
 
-  const Fy    = k * uy
-  const k2    = alpha * k
-  const A_off = Fy * (1.0 - alpha)   // fs = k2·u + A_off  (línea A, rama plástica +)
-  const B_off = -A_off               // fs = k2·u + B_off  (línea B, rama plástica −)
+  // Parámetros bilineales (notación Haukaas)
+  const Khi = k
+  const Klo = alpha * k
+  const xy  = uy
 
-  // Estado de rama persistente entre pasos:
-  //   bSign = 0  → elástica (línea C)
-  //   bSign = 1  → plástica positiva (línea A)
-  //   bSign = -1 → plástica negativa (línea B)
-  //   bK, bOff  → fs = bK·u + bOff para la rama actual
-  let bSign = 0
-  let bK    = k
-  let bOff  = 0.0   // línea C desde el origen: fs = k·u + 0
+  // Estado del material: matK y d (desplazamiento de equilibrio)
+  // Inicio elástico: R = Khi·(u − 0) = Khi·u
+  let matK = Khi
+  let d    = 0.0
 
   let convergedAll = true
 
   for (let i = 0; i < n - 1; i++) {
+
+    // Fuerza efectiva Newmark
     const pEff = -m * ug[i + 1] + a1N * u[i] + a2N * v[i] + a3N * a[i]
 
-    // ── NR con rigidez tangente local (copia mutable del estado) ──
-    let locK    = bK
-    let locOff  = bOff
-    let locSign = bSign
-    let des     = u[i]
-    let fel     = fs[i]
-    let Kp      = locK + a1N
-    let R       = pEff - fel - a1N * des
-    let iter    = 0
+    // ── Newton-Raphson (Haukaas) ──
+    // Equilibrio: matK·(des − d) + a1N·des = pEff
+    // Residual  = matK·(des − d) + a1N·des − pEff
+    // Keff      = matK + a1N
+    let locK = matK
+    let locD = d
+    let des  = u[i]
+    let converged = false
 
-    while (Math.abs(R) > tol && iter < maxIter) {
-      des += R / Kp
-
-      let fTrial = locK * des + locOff
-
-      if (uy > 0) {
-        // Evaluación de rama sin restricción (igual que Haukaas stateDetermination)
-        // Desde cualquier rama se puede ir a cualquier otra
-
-        // Plástica → elástica (inversión dentro del NR)
-        if (locSign === 1 && fTrial < k2 * des + A_off - tol) {
-          // Retrocede desde rama A → línea C desde punto actual
-          locK   = k
-          locOff = fel - k * (des - R / (locK + a1N))  // origen desde último punto convergido
-          locOff = fs[i] - k * u[i]                    // origen desde inicio del paso
-          locSign = 0
-          fTrial  = k * des + locOff
-        } else if (locSign === -1 && fTrial > k2 * des + B_off + tol) {
-          // Retrocede desde rama B → línea C desde inicio del paso
-          locK    = k
-          locOff  = fs[i] - k * u[i]
-          locSign = 0
-          fTrial  = k * des + locOff
-        }
-
-        // Elástica → plástica
-        if (locSign === 0) {
-          if (fTrial > +Fy) {
-            locK = k2;  locOff = A_off;  locSign = 1
-            fTrial = k2 * des + A_off
-          } else if (fTrial < -Fy) {
-            locK = k2;  locOff = B_off;  locSign = -1
-            fTrial = k2 * des + B_off
-          }
-        }
-      }
-
-      fel = fTrial
-      Kp  = locK + a1N
-      R   = pEff - fel - a1N * des
-      iter++
+    for (let iter = 0; iter < maxIter; iter++) {
+      const Fmat     = locK * (des - locD)
+      const Residual = Fmat + a1N * des - pEff
+      if (Math.abs(Residual) < tol) { converged = true; break }
+      const Keff = locK + a1N
+      des -= Residual / Keff
     }
 
-    if (iter >= maxIter) convergedAll = false
+    if (!converged) convergedAll = false
 
     u[i + 1]  = des
+    fs[i + 1] = locK * (des - locD)
     KT[i + 1] = locK
-    fs[i + 1] = fel
 
-    // Actualizar estado de rama para el próximo paso
-    bK    = locK
-    bOff  = locOff
-    bSign = locSign
-
+    // Velocidad y aceleración Newmark
     v[i + 1] = gammaN / (betaN * dt) * (u[i + 1] - u[i])
              + (1.0 - gammaN / betaN) * v[i]
-             + dt * (1.0 - 0.5 * gammaN / betaN) * a[i]
+             + dt  * (1.0 - 0.5 * gammaN / betaN) * a[i]
 
     a[i + 1] = (u[i + 1] - u[i]) / (betaN * dt * dt)
              - v[i] / (betaN * dt)
              - (0.5 / betaN - 1.0) * a[i]
 
-    // ── Post-paso: detección de inversión y fluencia (Gavin, pasos 5 y 6) ──
+    // ── Conmutación post-paso (Haukaas pasos 5 y 6) ──
     if (uy > 0) {
       let switched = false
 
-      // Paso 6 Gavin: inversión (plástica → elástica)
-      // Usa v[i+1]·v[i] < 0, ambas velocidades ya calculadas
-      if (bSign !== 0 && v[i + 1] * v[i] < 0) {
-        // Nuevo origen de línea C desde el punto de giro (u[i+1], fs[i+1])
-        bK    = k
-        bOff  = fs[i + 1] - k * u[i + 1]
-        bSign = 0
-        switched = true
-      }
+      // Paso 5: fluencia (solo cuando K = Khi)
+      if (locK === Khi) {
+        const fYield = Klo * u[i + 1] + (Khi - Klo) * xy * Math.sign(v[i + 1])
+        const fCurr  = locK * (u[i + 1] - locD)
 
-      // Paso 5 Gavin: fluencia (elástica → plástica)
-      // f_yield = k2·u[i+1] + (k − k2)·uy·sgn(v[i+1])
-      if (!switched && bSign === 0) {
-        const fYield = k2 * u[i + 1] + (k - k2) * uy * Math.sign(v[i + 1])
-        const fCurr  = k * u[i + 1] + bOff
         if (v[i + 1] > 0 && fCurr > fYield) {
-          bK    = k2;  bOff = A_off;  bSign = 1
+          // Fluencia positiva
+          locK = Klo
+          locD = (1.0 - Khi / Klo) * xy
           switched = true
         } else if (v[i + 1] < 0 && fCurr < fYield) {
-          bK    = k2;  bOff = B_off;  bSign = -1
+          // Fluencia negativa
+          locK = Klo
+          locD = (Khi / Klo - 1.0) * xy
           switched = true
         }
       }
 
-      // Paso 7 Gavin: si hubo conmutación, corregir v y a con paso pequeño
-      if (switched) {
-        const dtSmall = dt / 1e4
-        const a1S = m / (betaN * dtSmall * dtSmall) + gammaN * c / (betaN * dtSmall)
-        const pS  = a1S * u[i + 1] + (m / (betaN * dtSmall) + c * (gammaN / betaN - 1.0)) * v[i + 1]
-                  + (m * (0.5 / betaN - 1.0) + dtSmall * c * (0.5 * gammaN / betaN - 1.0)) * a[i + 1]
-        const fsS = bK * u[i + 1] + bOff
-        const uS  = (pS - fsS) / (bK + a1S)   // ≈ u[i+1] (paso ínfimo, δu ≈ 0)
-        v[i + 1]  = gammaN / (betaN * dtSmall) * (uS - u[i + 1])
-                  + (1.0 - gammaN / betaN) * v[i + 1]
-                  + dtSmall * (1.0 - 0.5 * gammaN / betaN) * a[i + 1]
-        a[i + 1]  = (-m * ug[i + 1] - c * v[i + 1] - fsS) / m
+      // Paso 6: inversión (solo cuando K = Klo)
+      if (!switched && locK === Klo && v[i + 1] * v[i] < 0) {
+        locD = u[i + 1] - (Klo / Khi) * (u[i + 1] - locD)
+        locK = Khi
+        switched = true
       }
+
+      // Paso 7: si hubo conmutación, actualizar fs y a con nueva rigidez
+      if (switched) {
+        fs[i + 1] = locK * (u[i + 1] - locD)
+        KT[i + 1] = locK
+        a[i + 1]  = (-m * ug[i + 1] - c * v[i + 1] - fs[i + 1]) / m
+      }
+
+      // Commit estado del material
+      matK = locK
+      d    = locD
+
+    } else {
+      matK = locK
+      d    = locD
     }
   }
 
