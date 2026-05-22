@@ -178,17 +178,111 @@ export function exportSDOFTxt(result, dt, params, fileName, units) {
   txt += `# m = ${m.toFixed(6)} ton    k = ${k.toFixed(6)} kN/m    xi = ${(xi * 100).toFixed(2)}%\n`
   txt += `# T = ${(2 * Math.PI / Math.sqrt(k / m)).toFixed(4)} s    uy = ${(uy * 100).toFixed(4)} cm    alpha = ${(alpha * 100).toFixed(2)}%\n`
   txt += `# max|u| = ${(result.maxU * dispU.factor).toFixed(4)} ${dispU.label}    max|v| = ${result.maxV.toFixed(4)} m/s\n`
-  txt += `# max|a_abs| = ${(result.maxAbs * accelU.factor).toFixed(4)} ${accelU.label}    Ductilidad = ${result.ductility.toFixed(3)}\n`
+  let maxRel = 0
+  for (let i = 0; i < result.aRel.length; i++) { if (Math.abs(result.aRel[i]) > maxRel) maxRel = Math.abs(result.aRel[i]) }
+  txt += `# max|a_rel| = ${(maxRel * accelU.factor).toFixed(4)} ${accelU.label}    Ductilidad = ${result.ductility.toFixed(3)}\n`
   txt += '# ============================================================\n'
-  txt += `  ${p('t(s)')}${p(`u(${dispU.label})`)}${p('v(m/s)')}${p(`a_abs(${accelU.label})`)}${p(`fs(${forceU.label})`)}\n`
+  txt += `  ${p('t(s)')}${p(`u(${dispU.label})`)}${p('v(m/s)')}${p(`a_rel(${accelU.label})`)}${p(`fs(${forceU.label})`)}\n`
   txt += `  ${'-'.repeat(W * 5)}\n`
   for (let i = 0; i < result.u.length; i++) {
-    txt += `  ${p((i * dt).toFixed(6))}${p((result.u[i] * dispU.factor).toFixed(8))}${p(result.v[i].toFixed(8))}${p((result.aAbs[i] * accelU.factor).toFixed(8))}${p((result.fs[i] * forceU.factor).toFixed(8))}\n`
+    txt += `  ${p((i * dt).toFixed(6))}${p((result.u[i] * dispU.factor).toFixed(8))}${p(result.v[i].toFixed(8))}${p((result.aRel[i] * accelU.factor).toFixed(8))}${p((result.fs[i] * forceU.factor).toFixed(8))}\n`
   }
   const blob = new Blob([txt], { type: 'text/plain' })
   const el = document.createElement('a')
   el.href = URL.createObjectURL(blob)
   el.download = 'sdof_nonlinear.txt'
+  document.body.appendChild(el); el.click(); document.body.removeChild(el)
+  URL.revokeObjectURL(el.href)
+}
+
+// ============================================================
+//  computeLinearSDOF — Newmark-Beta Lineal
+//  Implementación JS del namespace newmark::solve (newmark.h)
+//  Unidades internas: ton · kN · m · s
+// ============================================================
+export function computeLinearSDOF({
+  m, k, xi,
+  betaN  = 0.25,
+  gammaN = 0.5,
+  dt,
+  u0 = 0, v0 = 0,
+  ug,  // aceleración del suelo [m/s²]
+}) {
+  const n  = ug.length
+  const wn = Math.sqrt(k / m)
+  const c  = 2.0 * xi * m * wn
+
+  const a1   = m / (betaN * dt * dt) + gammaN * c / (betaN * dt)
+  const a2   = m / (betaN * dt)      + (gammaN / betaN - 1.0) * c
+  const a3   = (0.5 / betaN - 1.0) * m + dt * (0.5 * gammaN / betaN - 1.0) * c
+  const kEff = k + a1
+
+  const u  = new Float64Array(n)
+  const v  = new Float64Array(n)
+  const a  = new Float64Array(n)
+  const fs = new Float64Array(n)
+
+  u[0]  = u0;  v[0]  = v0
+  a[0]  = (-m * ug[0] - c * v0 - k * u0) / m
+  fs[0] = k * u0
+
+  const bDt  = betaN * dt
+  const bDt2 = betaN * dt * dt
+
+  for (let i = 0; i < n - 1; i++) {
+    const pEff = -m * ug[i + 1] + a1 * u[i] + a2 * v[i] + a3 * a[i]
+    u[i + 1]  = pEff / kEff
+    const du  = u[i + 1] - u[i]
+    v[i + 1]  = gammaN / bDt * du
+              + (1.0 - gammaN / betaN) * v[i]
+              + dt * (1.0 - 0.5 * gammaN / betaN) * a[i]
+    a[i + 1]  = du / bDt2
+              - v[i] / bDt
+              - (0.5 / betaN - 1.0) * a[i]
+    fs[i + 1] = k * u[i + 1]
+  }
+
+  let maxU = 0, maxV = 0, maxA = 0
+  for (let i = 0; i < n; i++) {
+    if (Math.abs(u[i])  > maxU) maxU = Math.abs(u[i])
+    if (Math.abs(v[i])  > maxV) maxV = Math.abs(v[i])
+    if (Math.abs(a[i])  > maxA) maxA = Math.abs(a[i])
+  }
+
+  return {
+    u:  Array.from(u),
+    v:  Array.from(v),
+    a:  Array.from(a),
+    fs: Array.from(fs),
+    maxU, maxV, maxA,
+    T: 2.0 * Math.PI / wn,
+  }
+}
+
+export function exportLinearTxt(result, dt, params, fileName, units) {
+  const { m, k, xi } = params
+  const dispU  = units?.disp  || { label: 'cm',    factor: 100 }
+  const accelU = units?.accel || { label: 'cm/s²', factor: 100 }
+  const forceU = units?.force || { label: 'kN',    factor: 1   }
+  const W = 18
+  const p = (s) => String(s).padEnd(W)
+  let txt = '# ============================================================\n'
+  txt += '# INERTIX - Análisis SDOF Lineal (Newmark-Beta)\n'
+  txt += `# Registro: ${fileName || 'N/A'}\n`
+  txt += `# m = ${m.toFixed(6)} ton    k = ${k.toFixed(6)} kN/m    xi = ${(xi * 100).toFixed(2)}%\n`
+  txt += `# T = ${result.T.toFixed(4)} s\n`
+  txt += `# max|u| = ${(result.maxU * dispU.factor).toFixed(4)} ${dispU.label}    max|v| = ${result.maxV.toFixed(4)} m/s\n`
+  txt += `# max|a_rel| = ${(result.maxA * accelU.factor).toFixed(4)} ${accelU.label}\n`
+  txt += '# ============================================================\n'
+  txt += `  ${p('t(s)')}${p(`u(${dispU.label})`)}${p('v(m/s)')}${p(`a_rel(${accelU.label})`)}${p(`fs(${forceU.label})`)}\n`
+  txt += `  ${'-'.repeat(W * 5)}\n`
+  for (let i = 0; i < result.u.length; i++) {
+    txt += `  ${p((i * dt).toFixed(6))}${p((result.u[i] * dispU.factor).toFixed(8))}${p(result.v[i].toFixed(8))}${p((result.a[i] * accelU.factor).toFixed(8))}${p((result.fs[i] * forceU.factor).toFixed(8))}\n`
+  }
+  const blob = new Blob([txt], { type: 'text/plain' })
+  const el = document.createElement('a')
+  el.href = URL.createObjectURL(blob)
+  el.download = 'sdof_linear.txt'
   document.body.appendChild(el); el.click(); document.body.removeChild(el)
   URL.revokeObjectURL(el.href)
 }
