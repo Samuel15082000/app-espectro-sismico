@@ -787,13 +787,16 @@ export default function EjemploEspectro() {
                 </div>
                 {seismic.accelChart ? (
                   <ResponsiveContainer width="100%" height={mobile ? 240 : '100%'}>
-                    <LineChart data={seismic.accelChart} margin={{ top: 2, right: 8, left: 0, bottom: 16 }}>
+                    <LineChart
+                      data={seismic.accelChart.map(p => ({ t: p.t, a: p.a / unitFactor }))}
+                      margin={{ top: 2, right: 8, left: 0, bottom: 16 }}
+                    >
                       <CartesianGrid strokeDasharray="3 3" stroke="#1C2333" />
                       <XAxis dataKey="t" stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
                         label={{ value: 'Tiempo (s)', position: 'insideBottom', offset: -8, fill: '#8B949E', fontSize: 10 }} />
                       <YAxis stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
                         label={{ value: `a (${UNIT_OPTIONS[unitIdx].label})`, angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 40 }} />
-                      <Tooltip {...tp} labelFormatter={v => `t = ${v} s`} formatter={v => [`${v}`, 'a']} />
+                      <Tooltip {...tp} labelFormatter={v => `t = ${v} s`} formatter={v => [`${v} ${UNIT_OPTIONS[unitIdx].label}`, 'a']} />
                       <Line type="monotone" dataKey="a" stroke={ACCENT} dot={false} strokeWidth={1} />
                     </LineChart>
                   </ResponsiveContainer>
