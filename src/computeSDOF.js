@@ -191,3 +191,4 @@ export function exportSDOFTxt(result, dt, params, fileName, units) {
   el.download = 'sdof_nonlinear.txt'
   document.body.appendChild(el); el.click(); document.body.removeChild(el)
   URL.revokeObjectURL(el.href)
+}
