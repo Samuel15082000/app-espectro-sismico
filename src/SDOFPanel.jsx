@@ -100,6 +100,10 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
   const betaN  = NEWMARK_PRESETS[presetIdx].beta
   const gammaN = NEWMARK_PRESETS[presetIdx].gamma
 
+  // Convergencia Newton-Raphson (solo modo no lineal)
+  const [maxIter, setMaxIter] = useState(50)
+  const [tol,     setTol]     = useState(1e-6)
+
   // Unidades de salida
   const [dispUnitIdx,  setDispUnitIdx]  = useState(0)
   const [accelUnitIdx, setAccelUnitIdx] = useState(0)
@@ -150,7 +154,7 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
             betaN, gammaN, dt,
             uy: uyM, alpha: aAlp,
             ug: ugMs2,
-            tol: 1e-6, maxIter: 50,
+            tol, maxIter,
           })
           setResult({ ...res, mode: 'nonlinear' })
         }
@@ -316,6 +320,22 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
           <div style={{ fontSize: 10, color: presetIdx === 0 ? '#3FB950' : BLUE, marginBottom: 2 }}>
             {presetIdx === 0 ? '→ Incondicionalmente estable' : '→ Mayor precisión numérica'}
           </div>
+
+          {/* Convergencia Newton-Raphson (solo no lineal) */}
+          {mode === 'nonlinear' && (<>
+            <div style={row}>
+              <span style={{ ...lbl, minWidth: 28 }}>iter</span>
+              <input type="number" min={10} max={500} step={10} value={maxIter}
+                onChange={e => setMaxIter(Math.max(10, Number(e.target.value)))}
+                style={inp({ width: 90, textAlign: 'right' })} />
+            </div>
+            <div style={row}>
+              <span style={{ ...lbl, minWidth: 28 }}>tol</span>
+              <input type="number" min={1e-12} step={1e-7} value={tol}
+                onChange={e => setTol(parseFloat(e.target.value) || 1e-6)}
+                style={inp({ width: 90, textAlign: 'right' })} />
+            </div>
+          </>)}
 
           {/* [3/4] Unidades de salida */}
           <div style={{ borderTop: `1px solid ${BORDER}`, paddingTop: 8, ...sec }}>
