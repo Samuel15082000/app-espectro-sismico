@@ -665,6 +665,8 @@ export default function EjemploEspectro() {
               dt={seismic.parsedRef.current.dt || 0.01}
               fileName={seismic.fileName}
               onUseCorrecta={handleUseCorrecta}
+              unitFactor={unitFactor}
+              unitLabel={UNIT_OPTIONS[unitIdx].label}
             />
           </div>
 

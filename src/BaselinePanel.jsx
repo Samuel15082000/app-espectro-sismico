@@ -9,12 +9,6 @@ import {
 } from 'recharts'
 import { computeBaseline, exportBaselineTxt } from './computeBaseline'
 
-const ACCEL_OUT_UNITS = [
-  { label: 'cm/s²', factor: 1         },
-  { label: 'm/s²',  factor: 0.01      },
-  { label: 'g',     factor: 1/980.665 },
-]
-
 const ACCENT  = '#E97817'
 const BG_DARK = '#111318'
 const BG_PANEL= '#181B22'
@@ -34,11 +28,10 @@ const ORDER_OPTS = [
   { id: 3, label: 'Cúbico (orden 3)' },
 ]
 
-export default function BaselinePanel({ accelArr, dt, fileName, onClose, onUseCorrecta }) {
-  const [order,      setOrder]      = useState(1)
-  const [result,     setResult]     = useState(null)
-  const [err,        setErr]        = useState(null)
-  const [outUnitIdx, setOutUnitIdx] = useState(0)
+export default function BaselinePanel({ accelArr, dt, fileName, onClose, onUseCorrecta, unitFactor = 1, unitLabel = 'cm/s²' }) {
+  const [order,  setOrder]  = useState(1)
+  const [result, setResult] = useState(null)
+  const [err,    setErr]    = useState(null)
 
   const handleCompute = () => {
     try {
@@ -53,18 +46,17 @@ export default function BaselinePanel({ accelArr, dt, fileName, onClose, onUseCo
   const chartData = useMemo(() => {
     const n    = accelArr.length
     const step = Math.max(1, Math.floor(n / 2000))
-    const outF = ACCEL_OUT_UNITS[outUnitIdx].factor
     const data = []
     for (let i = 0; i < n; i += step) {
       const pt = {
         t:    parseFloat((i * dt).toFixed(4)),
-        orig: parseFloat((accelArr[i] * outF).toFixed(5)),
+        orig: parseFloat((accelArr[i] / unitFactor).toFixed(5)),
       }
-      if (result) pt.corr = parseFloat((result.corrected[i] * outF).toFixed(5))
+      if (result) pt.corr = parseFloat((result.corrected[i] / unitFactor).toFixed(5))
       data.push(pt)
     }
     return data
-  }, [result, accelArr, dt, outUnitIdx])
+  }, [result, accelArr, dt, unitFactor])
 
   const hasRecord = accelArr && accelArr.length > 0
 
@@ -96,14 +88,6 @@ export default function BaselinePanel({ accelArr, dt, fileName, onClose, onUseCo
             <button onClick={handleCompute} disabled={!hasRecord} style={{ marginTop: 6, padding: '9px', borderRadius: 5, border: 'none', background: hasRecord ? ACCENT : '#21262D', color: hasRecord ? '#fff' : '#555', fontWeight: 700, fontSize: 13, cursor: hasRecord ? 'pointer' : 'not-allowed' }}>
               Aplicar Corrección
             </button>
-
-            <div style={{ borderTop: `1px solid ${BORDER}`, paddingTop: 8, marginTop: 4 }}>
-              <div style={sec}>Unidad gráfica / .txt</div>
-              <select value={outUnitIdx} onChange={e => setOutUnitIdx(Number(e.target.value))}
-                style={{ background: BG_DARK, border: `1px solid ${BORDER}`, color: '#E6EDF3', borderRadius: 5, padding: '5px 7px', fontSize: 12, width: '100%', boxSizing: 'border-box' }}>
-                {ACCEL_OUT_UNITS.map((u, i) => <option key={i} value={i}>{u.label}</option>)}
-              </select>
-            </div>
 
             {!hasRecord && (
               <div style={{ fontSize: 11, color: ACCENT, padding: '6px 8px', background: '#21262D', borderRadius: 4 }}>
@@ -145,7 +129,7 @@ export default function BaselinePanel({ accelArr, dt, fileName, onClose, onUseCo
                 Usar señal corregida ✓
               </button>
 
-              <button onClick={() => exportBaselineTxt(accelArr, result.corrected, result.poly, dt, result.coef, result.order, result.stats, fileName, ACCEL_OUT_UNITS[outUnitIdx].factor, ACCEL_OUT_UNITS[outUnitIdx].label)} style={{ padding: '8px', borderRadius: 5, border: `1px solid ${BORDER}`, background: '#21262D', color: '#ccc', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
+              <button onClick={() => exportBaselineTxt(accelArr, result.corrected, result.poly, dt, result.coef, result.order, result.stats, fileName, 1 / unitFactor, unitLabel)} style={{ padding: '8px', borderRadius: 5, border: `1px solid ${BORDER}`, background: '#21262D', color: '#ccc', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
                 Descargar .txt
               </button>
             </>)}
@@ -169,7 +153,7 @@ export default function BaselinePanel({ accelArr, dt, fileName, onClose, onUseCo
                   <XAxis dataKey="t" stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
                     label={{ value: 'Tiempo (s)', position: 'insideBottom', offset: -8, fill: '#8B949E', fontSize: 10 }} />
                   <YAxis stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
-                    label={{ value: `a (${ACCEL_OUT_UNITS[outUnitIdx].label})`, angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 30 }} />
+                    label={{ value: `a (${unitLabel})`, angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 30 }} />
                   <Tooltip {...tp} labelFormatter={v => `t = ${v} s`} />
                   {result && <Legend wrapperStyle={{ fontSize: 11 }} />}
                   <Line type="monotone" dataKey="orig" name="Original"  stroke={ACCENT} dot={false} strokeWidth={1}   strokeOpacity={result ? 0.45 : 1} />
