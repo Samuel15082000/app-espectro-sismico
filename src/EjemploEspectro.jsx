@@ -1,7 +1,6 @@
 // =============================================================================
-//  EjemploEspectro.jsx  —  INERTIX Espectro de Respuesta Sísmica
-//  Con ventana modal y auto-detección inteligente
-//  Requiere: recharts
+//  EjemploEspectro.jsx  —  INERTIX
+//  Layout de 4 tabs: Corrección LB / Espectros Elásticos / Inelásticos / 1GDL
 // =============================================================================
 
 import { useState, useCallback, useEffect, useRef } from 'react'
@@ -28,6 +27,13 @@ const BG_DARK  = '#111318'
 const BG_PANEL = '#181B22'
 const BORDER   = '#2A2D35'
 const BG_MODAL = '#1E2128'
+
+const TABS = [
+  'Corrección de Línea Base',
+  'Espectros Elásticos',
+  'Espectros Inelásticos',
+  'Sistemas de 1 GDL',
+]
 
 function useIsMobile(bp = 768) {
   const [m, setM] = useState(window.innerWidth < bp)
@@ -139,11 +145,9 @@ function BlockConfig({ rawLines, blockAnalysis, detectedFormat, onApply, onBack,
   const [manualDt,    setManualDt]    = useState(d.dt || 0.01)
   const [scaleFactor, setScaleFactor] = useState(1.0)
   const [hasTimeCol,  setHasTimeCol]  = useState(!!d.hasTimeCol)
-  // Unidades — sincronizadas con el sidebar principal
   const [localUnitIdx,      setLocalUnitIdx]      = useState(initUnitIdx ?? 0)
   const [localCustomFactor, setLocalCustomFactor] = useState(initCustomFactor ?? 1)
 
-  // Último valor: actualiza cuando cambia rango o separadores
   const [lastInfo, setLastInfo] = useState({
     text: d.lastLineText || '', num: d.lastLineNum || 0, parsed: d.lastParsed || []
   })
@@ -331,7 +335,6 @@ function BlockConfig({ rawLines, blockAnalysis, detectedFormat, onApply, onBack,
               </div>
             )}
 
-            {/* Último valor registrado */}
             <div style={sepS}></div>
             <div style={secS}>Último valor del registro</div>
             <div style={{ padding: '8px 10px', background: BG_DARK, borderRadius: 6, border: `1px solid ${BORDER}` }}>
@@ -398,7 +401,7 @@ function FileConfigModal({ rawLines, detectedConfig, onApply, onCancel, unitIdx,
 
   const [step,           setStep]           = useState(blocks.length > 0 ? 1 : 2)
   const [selectedIdx,    setSelectedIdx]    = useState(d.selectedBlockIdx ?? 0)
-  const [blockAnalysis,  setBlockAnalysis]  = useState(d)   // análisis del bloque activo
+  const [blockAnalysis,  setBlockAnalysis]  = useState(d)
 
   const selectBlock = (idx) => {
     setSelectedIdx(idx)
@@ -448,8 +451,12 @@ export default function EjemploEspectro() {
   const mobile = useIsMobile()
   const seismic = useSeismic()
 
+  // Shared state
   const [unitIdx,      setUnitIdx]      = useState(0)
   const [customFactor, setCustomFactor] = useState(1)
+  const [activeTab,    setActiveTab]    = useState(0)
+
+  // Espectros Elásticos tab state
   const [newmarkType,  setNewmarkType]  = useState(0)
   const [nCurves,      setNCurves]      = useState(5)
   const [dampings,     setDampings]     = useState([...DEFAULT_DAMPINGS])
@@ -459,13 +466,10 @@ export default function EjemploEspectro() {
   const [showParams,   setShowParams]   = useState(true)
   const [result,       setResult]       = useState(null)
   const [loading,      setLoading]      = useState(false)
-  const [showBaseline, setShowBaseline] = useState(false)
-  const [showSDOF,     setShowSDOF]     = useState(false)
   const [staleResult,  setStaleResult]  = useState(false)
 
   const unitFactor = UNIT_OPTIONS[unitIdx].factor !== null ? UNIT_OPTIONS[unitIdx].factor : customFactor
 
-  // Cuando cambia la unidad: re-escala los datos cargados y avisa si hay un espectro calculado
   const prevUnitFactor = useRef(unitFactor)
   useEffect(() => {
     if (prevUnitFactor.current === unitFactor) return
@@ -517,13 +521,13 @@ export default function EjemploEspectro() {
       })
     }
     seismic.setAccelChart(chart)
-    setShowBaseline(false)
     seismic.setStatus({ type: 'success', msg: 'Señal corregida aplicada. Recalcule el espectro.' })
   }, [seismic])
 
   const canCalc = !!seismic.parsedRef.current.accel && ready && !loading
   const { status } = seismic
 
+  // ---------------------------------------------------------------------------
   return (
     <div style={{ minHeight: '100vh', background: BG_DARK, color: '#E6EDF3', fontFamily: "'Inter',system-ui,sans-serif", display: 'flex', flexDirection: 'column' }}>
 
@@ -538,27 +542,6 @@ export default function EjemploEspectro() {
           setCustomFactor={setCustomFactor}
           onApply={config => { seismic.applyConfig(config); setStaleResult(false) }}
           onCancel={() => seismic.setShowModal(false)}
-        />
-      )}
-
-      {/* Panel: Corrección de Línea Base */}
-      {showBaseline && (
-        <BaselinePanel
-          accelArr={seismic.parsedRef.current.accel || []}
-          dt={seismic.parsedRef.current.dt || 0.01}
-          fileName={seismic.fileName}
-          onClose={() => setShowBaseline(false)}
-          onUseCorrecta={handleUseCorrecta}
-        />
-      )}
-
-      {/* Panel: Análisis SDOF No Lineal */}
-      {showSDOF && (
-        <SDOFPanel
-          accelArr={seismic.parsedRef.current.accel || []}
-          dt={seismic.parsedRef.current.dt || 0.01}
-          fileName={seismic.fileName}
-          onClose={() => setShowSDOF(false)}
         />
       )}
 
@@ -584,15 +567,45 @@ export default function EjemploEspectro() {
         </div>
       </header>
 
-      <div style={{ display: 'flex', flexDirection: mobile ? 'column' : 'row', flex: 1, overflow: mobile ? 'auto' : 'hidden' }}>
+      {/* Barra de navegación de tabs */}
+      <div style={{ background: BG_PANEL, borderBottom: `1px solid ${BORDER}`, display: 'flex', overflowX: 'auto', flexShrink: 0 }}>
+        {TABS.map((label, i) => (
+          <button
+            key={i}
+            onClick={() => setActiveTab(i)}
+            style={{
+              padding: mobile ? '9px 13px' : '10px 22px',
+              background: 'transparent',
+              border: 'none',
+              borderBottom: `2px solid ${activeTab === i ? ACCENT : 'transparent'}`,
+              color: activeTab === i ? ACCENT : '#8B949E',
+              fontWeight: activeTab === i ? 700 : 400,
+              fontSize: mobile ? 12 : 13,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              letterSpacing: 0.3,
+              fontFamily: 'inherit',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
-        {/* Sidebar */}
+      {/* Layout principal */}
+      <div style={{ display: 'flex', flex: 1, flexDirection: mobile ? 'column' : 'row', overflow: mobile ? 'auto' : 'hidden', minHeight: 0 }}>
+
+        {/* ── Sidebar compartido: Registro + Unidades ── */}
         <aside style={{
-          width: mobile ? '100%' : 290, minWidth: mobile ? 'auto' : 290,
-          background: BG_PANEL, borderRight: mobile ? 'none' : `1px solid ${BORDER}`,
+          width: mobile ? '100%' : 240,
+          minWidth: mobile ? 'auto' : 240,
+          background: BG_PANEL,
+          borderRight: mobile ? 'none' : `1px solid ${BORDER}`,
           borderBottom: mobile ? `1px solid ${BORDER}` : 'none',
-          padding: 12, overflowY: mobile ? 'visible' : 'auto',
+          padding: 12,
+          overflowY: mobile ? 'visible' : 'auto',
           display: 'flex', flexDirection: 'column', gap: 10,
+          flexShrink: 0,
         }}>
 
           {/* [1] Archivo */}
@@ -626,111 +639,21 @@ export default function EjemploEspectro() {
             )}
           </section>
 
-          {mobile && (
-            <button onClick={() => setShowParams(!showParams)} style={{ background: 'transparent', border: `1px solid ${BORDER}`, color: ACCENT, borderRadius: 5, padding: '7px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
-              {showParams ? '▲ Ocultar parámetros' : '▼ Configurar parámetros'}
-            </button>
-          )}
-
-          {(showParams || !mobile) && <>
-
-            <section>
-              <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[2] Unidades</div>
-              <select value={unitIdx} onChange={e => setUnitIdx(Number(e.target.value))} style={inp({ width: '100%' })}>
-                {UNIT_OPTIONS.map((u, i) => <option key={i} value={i}>{u.label}</option>)}
-              </select>
-              {unitIdx === 3 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
-                  <span style={{ fontSize: 11, color: '#8B949E' }}>Factor → cm/s²</span>
-                  <input type="number" min={0.0001} step={0.01} value={customFactor}
-                    onChange={e => setCustomFactor(parseFloat(e.target.value) || 1)}
-                    style={inp({ width: 80, textAlign: 'right' })} />
-                </div>
-              )}
-            </section>
-
-            <section>
-              <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[3] Amortiguamiento</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
-                <span style={{ fontSize: 11, color: '#8B949E', flex: 1 }}>N. curvas</span>
-                <button style={{ width: 26, height: 26, background: '#21262D', border: `1px solid ${BORDER}`, color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 16 }} onClick={() => handleNCurves(nCurves - 1)}>−</button>
-                <span style={{ fontWeight: 700, minWidth: 16, textAlign: 'center' }}>{nCurves}</span>
-                <button style={{ width: 26, height: 26, background: '#21262D', border: `1px solid ${BORDER}`, color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 16 }} onClick={() => handleNCurves(nCurves + 1)}>+</button>
+          {/* [2] Unidades de entrada — compartido: afecta todos los tabs */}
+          <section>
+            <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[2] Unidades de Entrada</div>
+            <select value={unitIdx} onChange={e => setUnitIdx(Number(e.target.value))} style={inp({ width: '100%' })}>
+              {UNIT_OPTIONS.map((u, i) => <option key={i} value={i}>{u.label}</option>)}
+            </select>
+            {unitIdx === 3 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
+                <span style={{ fontSize: 11, color: '#8B949E' }}>Factor → cm/s²</span>
+                <input type="number" min={0.0001} step={0.01} value={customFactor}
+                  onChange={e => setCustomFactor(parseFloat(e.target.value) || 1)}
+                  style={inp({ width: 80, textAlign: 'right' })} />
               </div>
-              <button onClick={() => setDampings([...DEFAULT_DAMPINGS])} style={{ width: '100%', padding: '5px', borderRadius: 4, border: `1px solid ${BORDER}`, background: '#21262D', color: '#ccc', fontSize: 11, cursor: 'pointer', marginBottom: 5 }}>
-                Defecto 0/1/2/3/5 %
-              </button>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px' }}>
-                {dampings.slice(0, nCurves).map((d, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: 2, background: DAMPING_COLORS[i] }}></div>
-                    <span style={{ fontSize: 11, color: '#8B949E' }}>ξ{i + 1}</span>
-                    <input type="number" min={0} max={100} step={0.5} value={d}
-                      onChange={e => setDamping(i, e.target.value)}
-                      style={inp({ width: 52, textAlign: 'right', padding: '3px 5px' })} />
-                    <span style={{ fontSize: 10, color: '#555' }}>%</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section>
-              <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[4] Newmark-Beta</div>
-              <select value={newmarkType} onChange={e => setNewmarkType(Number(e.target.value))} style={inp({ width: '100%' })}>
-                <option value={0}>Accel. Constante (β=1/4, γ=1/2)</option>
-                <option value={1}>Accel. Lineal (β=1/6, γ=1/2)</option>
-              </select>
-              <div style={{ fontSize: 10, color: '#3FB950', marginTop: 3 }}>
-                {newmarkType === 0 ? '→ Incondicionalmente estable' : '→ Mayor precisión numérica'}
-              </div>
-            </section>
-
-            <section>
-              <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[5] Rango del Espectro</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 10px' }}>
-                {[
-                  { label: 'T mín (s)',   val: TMin,     set: setTMin,     step: 0.01 },
-                  { label: 'T máx (s)',   val: TMax,     set: setTMax,     step: 0.5 },
-                  { label: 'N. periodos', val: nPeriods,  set: setNPeriods, step: 100 },
-                ].map(({ label, val, set, step }) => (
-                  <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                    <span style={{ fontSize: 11, color: '#8B949E', minWidth: 72 }}>{label}</span>
-                    <input type="number" value={val} step={step}
-                      onChange={e => set(parseFloat(e.target.value) || val)}
-                      style={inp({ width: 72, textAlign: 'right', padding: '3px 5px' })} />
-                  </div>
-                ))}
-              </div>
-            </section>
-          </>}
-
-          {staleResult && (
-            <div style={{ fontSize: 11, padding: '6px 9px', borderRadius: 5, background: '#2A1F0A', color: '#FBBF24', border: '1px solid #4A3A10' }}>
-              ⚠ Unidades modificadas — espectro no actualizado
-            </div>
-          )}
-
-          <button onClick={handleCalculate} disabled={!canCalc} style={{
-            width: '100%', padding: mobile ? '12px' : '10px', borderRadius: 6, border: 'none',
-            background: canCalc ? ACCENT : '#21262D', color: canCalc ? '#fff' : '#555',
-            fontWeight: 700, fontSize: 13, cursor: canCalc ? 'pointer' : 'not-allowed', letterSpacing: 0.6
-          }}>
-            {loading ? 'CALCULANDO...' : 'CALCULAR ESPECTRO'}
-          </button>
-
-          <button onClick={() => setShowBaseline(true)} style={{
-            width: '100%', padding: '9px', borderRadius: 6, border: `1px solid ${BORDER}`,
-            background: '#21262D', color: '#C9D1D9', fontWeight: 600, fontSize: 12, cursor: 'pointer', letterSpacing: 0.4
-          }}>
-            Corrección de Línea Base
-          </button>
-
-          <button onClick={() => setShowSDOF(true)} style={{
-            width: '100%', padding: '9px', borderRadius: 6, border: `1px solid ${BORDER}`,
-            background: '#21262D', color: '#C9D1D9', fontWeight: 600, fontSize: 12, cursor: 'pointer', letterSpacing: 0.4
-          }}>
-            Análisis SDOF No Lineal
-          </button>
+            )}
+          </section>
 
           {status && (
             <div style={{
@@ -740,70 +663,193 @@ export default function EjemploEspectro() {
               border: `1px solid ${status.type === 'error' ? '#3D1F1F' : status.type === 'success' ? '#1A3D2B' : BORDER}`,
             }}>{status.msg}</div>
           )}
-
-          {result && (
-            <button onClick={() => exportTxt(
-              Array.from(result.periods), result.Sa.map(c => Array.from(c)),
-              result.dampings, seismic.fileName, newmarkType, UNIT_OPTIONS[unitIdx].label
-            )} style={{ width: '100%', padding: '8px', borderRadius: 5, border: `1px solid ${BORDER}`, background: '#21262D', color: '#ccc', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
-              Descargar espectro_respuesta.txt
-            </button>
-          )}
         </aside>
 
-        {/* Gráficas */}
-        <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: mobile ? 'visible' : 'hidden', minWidth: 0 }}>
+        {/* ── Área de tabs ── */}
+        <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minWidth: 0, minHeight: 0 }}>
 
-          <div style={{ flex: 1, minHeight: mobile ? 280 : 0, padding: '8px 12px', display: 'flex', flexDirection: 'column', borderBottom: `1px solid ${BORDER}` }}>
-            <div style={{ fontSize: 11, color: '#8B949E', marginBottom: 4 }}>
-              Acelerograma {seismic.fileInfo ? `— ${seismic.fileInfo.npts.toLocaleString()} pts · dt=${seismic.fileInfo.dt}s` : ''}
-            </div>
-            {seismic.accelChart ? (
-              <ResponsiveContainer width="100%" height={mobile ? 240 : '100%'}>
-                <LineChart data={seismic.accelChart} margin={{ top: 2, right: 8, left: 0, bottom: 16 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1C2333" />
-                  <XAxis dataKey="t" stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
-                    label={{ value: 'Tiempo (s)', position: 'insideBottom', offset: -8, fill: '#8B949E', fontSize: 10 }} />
-                  <YAxis stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
-                    label={{ value: `a (${UNIT_OPTIONS[unitIdx].label})`, angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 40 }} />
-                  <Tooltip {...tp} labelFormatter={v => `t = ${v} s`} formatter={v => [`${v}`, 'a']} />
-                  <Line type="monotone" dataKey="a" stroke={ACCENT} dot={false} strokeWidth={1} />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div style={{ flex: 1, minHeight: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2A2D35', fontSize: 12 }}>
-                Cargue un registro sísmico para visualizar el acelerograma.
-              </div>
-            )}
+          {/* ── Tab 0: Corrección de Línea Base ── */}
+          <div style={{ flex: 1, display: activeTab === 0 ? 'flex' : 'none', overflow: 'hidden' }}>
+            <BaselinePanel
+              accelArr={seismic.parsedRef.current.accel || []}
+              dt={seismic.parsedRef.current.dt || 0.01}
+              fileName={seismic.fileName}
+              onUseCorrecta={handleUseCorrecta}
+            />
           </div>
 
-          <div style={{ flex: 1, minHeight: mobile ? 300 : 0, padding: '8px 12px', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ fontSize: 11, color: '#8B949E', marginBottom: 4 }}>
-              Espectro de Pseudoaceleración Sa vs Período T
-            </div>
-            {result ? (
-              <ResponsiveContainer width="100%" height={mobile ? 260 : '100%'}>
-                <LineChart data={result.chartData} margin={{ top: 2, right: 8, left: 0, bottom: 16 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1C2333" />
-                  <XAxis dataKey="T" stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
-                    label={{ value: 'Período T (s)', position: 'insideBottom', offset: -8, fill: '#8B949E', fontSize: 10 }} />
-                  <YAxis stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
-                    label={{ value: 'Sa (cm/s²)', angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 30 }} />
-                  <Tooltip {...tp} labelFormatter={v => `T = ${v} s`} formatter={(v, n) => [`${v} cm/s²`, n]} />
-                  <Legend wrapperStyle={{ fontSize: 11, color: '#8B949E', paddingTop: 2 }} />
-                  {result.dampings.map((d, i) => (
-                    <Line key={i} type="monotone" dataKey={`xi${i}`} name={`ξ = ${d}%`}
-                      stroke={DAMPING_COLORS[i]} dot={false} strokeWidth={1.5} />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div style={{ flex: 1, minHeight: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2A2D35', fontSize: 12 }}>
-                {seismic.fileInfo ? 'Presione CALCULAR ESPECTRO para generar el espectro.' : 'Cargue un registro sísmico y calcule el espectro.'}
+          {/* ── Tab 1: Espectros Elásticos ── */}
+          <div style={{ flex: 1, display: activeTab === 1 ? 'flex' : 'none', flexDirection: mobile ? 'column' : 'row', overflow: mobile ? 'auto' : 'hidden' }}>
+
+            {/* Params sidebar específico del tab */}
+            <aside style={{
+              width: mobile ? '100%' : 260,
+              minWidth: mobile ? 'auto' : 260,
+              background: BG_PANEL,
+              borderRight: mobile ? 'none' : `1px solid ${BORDER}`,
+              borderBottom: mobile ? `1px solid ${BORDER}` : 'none',
+              padding: 12,
+              overflowY: mobile ? 'visible' : 'auto',
+              display: 'flex', flexDirection: 'column', gap: 10,
+            }}>
+
+              {mobile && (
+                <button onClick={() => setShowParams(!showParams)} style={{ background: 'transparent', border: `1px solid ${BORDER}`, color: ACCENT, borderRadius: 5, padding: '7px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+                  {showParams ? '▲ Ocultar parámetros' : '▼ Configurar parámetros'}
+                </button>
+              )}
+
+              {(showParams || !mobile) && <>
+                <section>
+                  <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[3] Amortiguamiento</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                    <span style={{ fontSize: 11, color: '#8B949E', flex: 1 }}>N. curvas</span>
+                    <button style={{ width: 26, height: 26, background: '#21262D', border: `1px solid ${BORDER}`, color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 16 }} onClick={() => handleNCurves(nCurves - 1)}>−</button>
+                    <span style={{ fontWeight: 700, minWidth: 16, textAlign: 'center' }}>{nCurves}</span>
+                    <button style={{ width: 26, height: 26, background: '#21262D', border: `1px solid ${BORDER}`, color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 16 }} onClick={() => handleNCurves(nCurves + 1)}>+</button>
+                  </div>
+                  <button onClick={() => setDampings([...DEFAULT_DAMPINGS])} style={{ width: '100%', padding: '5px', borderRadius: 4, border: `1px solid ${BORDER}`, background: '#21262D', color: '#ccc', fontSize: 11, cursor: 'pointer', marginBottom: 5 }}>
+                    Defecto 0/1/2/3/5 %
+                  </button>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px' }}>
+                    {dampings.slice(0, nCurves).map((d, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: 2, background: DAMPING_COLORS[i] }}></div>
+                        <span style={{ fontSize: 11, color: '#8B949E' }}>ξ{i + 1}</span>
+                        <input type="number" min={0} max={100} step={0.5} value={d}
+                          onChange={e => setDamping(i, e.target.value)}
+                          style={inp({ width: 52, textAlign: 'right', padding: '3px 5px' })} />
+                        <span style={{ fontSize: 10, color: '#555' }}>%</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section>
+                  <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[4] Newmark-Beta</div>
+                  <select value={newmarkType} onChange={e => setNewmarkType(Number(e.target.value))} style={inp({ width: '100%' })}>
+                    <option value={0}>Accel. Constante (β=1/4, γ=1/2)</option>
+                    <option value={1}>Accel. Lineal (β=1/6, γ=1/2)</option>
+                  </select>
+                  <div style={{ fontSize: 10, color: '#3FB950', marginTop: 3 }}>
+                    {newmarkType === 0 ? '→ Incondicionalmente estable' : '→ Mayor precisión numérica'}
+                  </div>
+                </section>
+
+                <section>
+                  <div style={{ fontSize: 10, color: ACCENT, fontWeight: 700, letterSpacing: 1.2, marginBottom: 5, textTransform: 'uppercase' }}>[5] Rango del Espectro</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 10px' }}>
+                    {[
+                      { label: 'T mín (s)',   val: TMin,    set: setTMin,    step: 0.01 },
+                      { label: 'T máx (s)',   val: TMax,    set: setTMax,    step: 0.5 },
+                      { label: 'N. periodos', val: nPeriods, set: setNPeriods, step: 100 },
+                    ].map(({ label, val, set, step }) => (
+                      <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <span style={{ fontSize: 11, color: '#8B949E', minWidth: 72 }}>{label}</span>
+                        <input type="number" value={val} step={step}
+                          onChange={e => set(parseFloat(e.target.value) || val)}
+                          style={inp({ width: 72, textAlign: 'right', padding: '3px 5px' })} />
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </>}
+
+              {staleResult && (
+                <div style={{ fontSize: 11, padding: '6px 9px', borderRadius: 5, background: '#2A1F0A', color: '#FBBF24', border: '1px solid #4A3A10' }}>
+                  ⚠ Unidades modificadas — espectro no actualizado
+                </div>
+              )}
+
+              <button onClick={handleCalculate} disabled={!canCalc} style={{
+                width: '100%', padding: mobile ? '12px' : '10px', borderRadius: 6, border: 'none',
+                background: canCalc ? ACCENT : '#21262D', color: canCalc ? '#fff' : '#555',
+                fontWeight: 700, fontSize: 13, cursor: canCalc ? 'pointer' : 'not-allowed', letterSpacing: 0.6
+              }}>
+                {loading ? 'CALCULANDO...' : 'CALCULAR ESPECTRO'}
+              </button>
+
+              {result && (
+                <button onClick={() => exportTxt(
+                  Array.from(result.periods), result.Sa.map(c => Array.from(c)),
+                  result.dampings, seismic.fileName, newmarkType, UNIT_OPTIONS[unitIdx].label
+                )} style={{ width: '100%', padding: '8px', borderRadius: 5, border: `1px solid ${BORDER}`, background: '#21262D', color: '#ccc', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
+                  Descargar espectro_respuesta.txt
+                </button>
+              )}
+            </aside>
+
+            {/* Área de gráficas */}
+            <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: mobile ? 'visible' : 'hidden', minWidth: 0 }}>
+              <div style={{ flex: 1, minHeight: mobile ? 280 : 0, padding: '8px 12px', display: 'flex', flexDirection: 'column', borderBottom: `1px solid ${BORDER}` }}>
+                <div style={{ fontSize: 11, color: '#8B949E', marginBottom: 4 }}>
+                  Acelerograma {seismic.fileInfo ? `— ${seismic.fileInfo.npts.toLocaleString()} pts · dt=${seismic.fileInfo.dt}s` : ''}
+                </div>
+                {seismic.accelChart ? (
+                  <ResponsiveContainer width="100%" height={mobile ? 240 : '100%'}>
+                    <LineChart data={seismic.accelChart} margin={{ top: 2, right: 8, left: 0, bottom: 16 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1C2333" />
+                      <XAxis dataKey="t" stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
+                        label={{ value: 'Tiempo (s)', position: 'insideBottom', offset: -8, fill: '#8B949E', fontSize: 10 }} />
+                      <YAxis stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
+                        label={{ value: `a (${UNIT_OPTIONS[unitIdx].label})`, angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 40 }} />
+                      <Tooltip {...tp} labelFormatter={v => `t = ${v} s`} formatter={v => [`${v}`, 'a']} />
+                      <Line type="monotone" dataKey="a" stroke={ACCENT} dot={false} strokeWidth={1} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div style={{ flex: 1, minHeight: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2A2D35', fontSize: 12 }}>
+                    Cargue un registro sísmico para visualizar el acelerograma.
+                  </div>
+                )}
               </div>
-            )}
+
+              <div style={{ flex: 1, minHeight: mobile ? 300 : 0, padding: '8px 12px', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ fontSize: 11, color: '#8B949E', marginBottom: 4 }}>
+                  Espectro de Pseudoaceleración Sa vs Período T
+                </div>
+                {result ? (
+                  <ResponsiveContainer width="100%" height={mobile ? 260 : '100%'}>
+                    <LineChart data={result.chartData} margin={{ top: 2, right: 8, left: 0, bottom: 16 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1C2333" />
+                      <XAxis dataKey="T" stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
+                        label={{ value: 'Período T (s)', position: 'insideBottom', offset: -8, fill: '#8B949E', fontSize: 10 }} />
+                      <YAxis stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
+                        label={{ value: 'Sa (cm/s²)', angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 30 }} />
+                      <Tooltip {...tp} labelFormatter={v => `T = ${v} s`} formatter={(v, n) => [`${v} cm/s²`, n]} />
+                      <Legend wrapperStyle={{ fontSize: 11, color: '#8B949E', paddingTop: 2 }} />
+                      {result.dampings.map((d, i) => (
+                        <Line key={i} type="monotone" dataKey={`xi${i}`} name={`ξ = ${d}%`}
+                          stroke={DAMPING_COLORS[i]} dot={false} strokeWidth={1.5} />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div style={{ flex: 1, minHeight: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2A2D35', fontSize: 12 }}>
+                    {seismic.fileInfo ? 'Presione CALCULAR ESPECTRO para generar el espectro.' : 'Cargue un registro sísmico y calcule el espectro.'}
+                  </div>
+                )}
+              </div>
+            </main>
           </div>
-        </main>
+
+          {/* ── Tab 2: Espectros Inelásticos ── */}
+          <div style={{ flex: 1, display: activeTab === 2 ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 14 }}>
+            <div style={{ fontSize: 48, opacity: 0.15 }}>⚡</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#555' }}>Espectros Inelásticos</div>
+            <div style={{ fontSize: 12, color: '#3A3D45' }}>Próximamente</div>
+          </div>
+
+          {/* ── Tab 3: Sistemas de 1 GDL ── */}
+          <div style={{ flex: 1, display: activeTab === 3 ? 'flex' : 'none', overflow: 'hidden' }}>
+            <SDOFPanel
+              accelArr={seismic.parsedRef.current.accel || []}
+              dt={seismic.parsedRef.current.dt || 0.01}
+              fileName={seismic.fileName}
+            />
+          </div>
+
+        </div>
       </div>
     </div>
   )

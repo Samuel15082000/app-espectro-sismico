@@ -147,17 +147,16 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
   const paramsSI = { m: mSI, k: kSI, xi: xi / 100, uy: uyVal * UY_UNITS[uyUnit].factor, alpha: alpha / 100 }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 10 }}>
-      <div style={{ background: BG_MOD, border: `1px solid ${BORDER}`, borderRadius: 10, width: 'min(1200px,99vw)', maxHeight: '96vh', display: 'flex', flexDirection: 'column', color: '#E6EDF3', overflow: 'hidden' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', padding: '11px 18px', borderBottom: `1px solid ${BORDER}`, gap: 10, flexShrink: 0 }}>
-          <span style={{ fontWeight: 700, fontSize: 15, color: ACCENT }}>Análisis SDOF No Lineal</span>
+          <span style={{ fontWeight: 700, fontSize: 15, color: ACCENT }}>Sistemas de 1 GDL — Análisis No Lineal</span>
           <span style={{ fontSize: 11, color: '#555', flex: 1 }}>
             Modelo bilineal · Newmark-Beta
             {hasRecord && <span style={{ color: '#3FB950', marginLeft: 8 }}>· {accelArr.length.toLocaleString()} pts</span>}
           </span>
-          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#8B949E', fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>×</button>
+          {onClose && <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#8B949E', fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>×</button>}
         </div>
 
         <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -382,7 +381,6 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
             </>)}
           </div>
         </div>
-      </div>
     </div>
   )
 }

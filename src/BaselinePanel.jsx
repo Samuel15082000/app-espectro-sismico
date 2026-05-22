@@ -69,8 +69,7 @@ export default function BaselinePanel({ accelArr, dt, fileName, onClose, onUseCo
   const hasRecord = accelArr && accelArr.length > 0
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 10 }}>
-      <div style={{ background: BG_MOD, border: `1px solid ${BORDER}`, borderRadius: 10, width: 'min(1120px,98vw)', maxHeight: '95vh', display: 'flex', flexDirection: 'column', color: '#E6EDF3', overflow: 'hidden' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', padding: '11px 18px', borderBottom: `1px solid ${BORDER}`, gap: 10, flexShrink: 0 }}>
@@ -78,7 +77,7 @@ export default function BaselinePanel({ accelArr, dt, fileName, onClose, onUseCo
           <span style={{ fontSize: 11, color: '#555', flex: 1 }}>
             {fileName || ''}{accelArr ? ` — ${accelArr.length.toLocaleString()} pts · dt = ${dt} s` : ''}
           </span>
-          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#8B949E', fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>×</button>
+          {onClose && <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#8B949E', fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}>×</button>}
         </div>
 
         <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -184,7 +183,7 @@ export default function BaselinePanel({ accelArr, dt, fileName, onClose, onUseCo
             )}
           </div>
         </div>
-      </div>
     </div>
   )
 }
+
