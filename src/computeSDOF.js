@@ -80,6 +80,17 @@ export function computeSDOF({
   for (let i = 0; i < n - 1; i++) {
     const pEff = -m * ug[i + 1] + a1N * u[i] + a2N * v[i] + a3N * a[i]
 
+    // ── Entre pasos: detección de inversión (plástica → elástica) ──
+    // Inversión cuando la velocidad cambia de signo respecto a la rama activa.
+    if (uy > 0 && bSign !== 0) {
+      if ((bSign > 0 && v[i] < 0) || (bSign < 0 && v[i] > 0)) {
+        // Punto de giro: (u[i], fs[i]) → nuevo origen de la línea C
+        bK    = k
+        bOff  = fs[i] - k * u[i]
+        bSign = 0
+      }
+    }
+
     // ── NR con rigidez tangente local (copia mutable del estado) ──
     let locK    = bK
     let locOff  = bOff
@@ -95,31 +106,18 @@ export function computeSDOF({
 
       let fTrial = locK * des + locOff
 
-      if (uy > 0) {
-        // ── FIX #1: descarga detectada DENTRO del NR por dirección de desplazamiento ──
-        // Más preciso que usar velocidad del paso anterior
-        if (locSign !== 0) {
-          const unloading = (locSign > 0 && des < u[i]) ||
-                            (locSign < 0 && des > u[i])
-          if (unloading) {
-            locOff  = fel - k * des   // pivote en el punto trial actual
-            locK    = k
-            locSign = 0
-            fTrial  = k * des + locOff
-          }
-        }
-
-        // ── FIX #2: criterio correcto de fluencia — intersección con Línea A/B ──
-        // ANTES (incorrecto para alpha>0): fTrial > +Fy
-        // AHORA (correcto):                fTrial > k2·des + A_off  (= valor de Línea A en 'des')
-        if (locSign === 0) {
-          if (fTrial > k2 * des + A_off) {
-            locK = k2;  locOff = A_off;  locSign = 1
-            fTrial = k2 * des + A_off
-          } else if (fTrial < k2 * des + B_off) {
-            locK = k2;  locOff = B_off;  locSign = -1
-            fTrial = k2 * des + B_off
-          }
+      // Elástica → plástica: se verifica solo cuando estamos en línea C.
+      // ── FIX: criterio correcto de fluencia — intersección con Línea A/B ──
+      // ANTES (incorrecto para alpha>0): fTrial > +Fy   (Fy es un escalar fijo)
+      // AHORA (correcto): fTrial > k2·des + A_off  (valor de Línea A en el 'des' actual)
+      // Para alpha=0: k2=0 y A_off=Fy, así la expresión se reduce a fTrial > Fy (idéntico al original).
+      if (uy > 0 && locSign === 0) {
+        if (fTrial > k2 * des + A_off) {
+          locK = k2;  locOff = A_off;  locSign = 1
+          fTrial = k2 * des + A_off
+        } else if (fTrial < k2 * des + B_off) {
+          locK = k2;  locOff = B_off;  locSign = -1
+          fTrial = k2 * des + B_off
         }
       }
 
