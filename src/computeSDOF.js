@@ -2,8 +2,13 @@
 //  computeSDOF.js — INERTIX
 //  Newmark-Beta No Lineal — SDOF Bilineal (modelo bilineal no degradante)
 //
-//  Algoritmo: conmutación de rigidez con líneas A/B/C fijas
+//  Algoritmo: Newmark-Beta + conmutación de ramas post-paso (Gavin, pasos 5-7)
 //  Ref: Gavin, CEE 541 Duke (NumericalIntegration 2020, BilinearHysteresis 2014)
+//
+//  Correcciones respecto a versión anterior:
+//  - Detección de inversión con v[i+1]·v[i] < 0 (ambas velocidades calculadas)
+//  - Detección de fluencia con f_yield = k2·u + (k−k2)·uy·sgn(v) (Gavin ec. 44)
+//  - Corrección de v y a con paso pequeño dt/1e4 tras conmutación (Gavin paso 7)
 //
 //  Línea A (plástica positiva): fs = k2·u + Fy·(1−α)
 //  Línea B (plástica negativa): fs = k2·u − Fy·(1−α)
@@ -80,17 +85,6 @@ export function computeSDOF({
   for (let i = 0; i < n - 1; i++) {
     const pEff = -m * ug[i + 1] + a1N * u[i] + a2N * v[i] + a3N * a[i]
 
-    // ── Entre pasos: detección de inversión (plástica → elástica) ──
-    // Inversión cuando la velocidad cambia de signo respecto a la rama activa.
-    if (uy > 0 && bSign !== 0) {
-      if ((bSign > 0 && v[i] < 0) || (bSign < 0 && v[i] > 0)) {
-        // Punto de giro: (u[i], fs[i]) → nuevo origen de la línea C
-        bK    = k
-        bOff  = fs[i] - k * u[i]
-        bSign = 0
-      }
-    }
-
     // ── NR con rigidez tangente local (copia mutable del estado) ──
     let locK    = bK
     let locOff  = bOff
@@ -141,6 +135,49 @@ export function computeSDOF({
     a[i + 1] = (u[i + 1] - u[i]) / (betaN * dt * dt)
              - v[i] / (betaN * dt)
              - (0.5 / betaN - 1.0) * a[i]
+
+    // ── Post-paso: detección de inversión y fluencia (Gavin, pasos 5 y 6) ──
+    if (uy > 0) {
+      let switched = false
+
+      // Paso 6 Gavin: inversión (plástica → elástica)
+      // Usa v[i+1]·v[i] < 0, ambas velocidades ya calculadas
+      if (bSign !== 0 && v[i + 1] * v[i] < 0) {
+        // Nuevo origen de línea C desde el punto de giro (u[i+1], fs[i+1])
+        bK    = k
+        bOff  = fs[i + 1] - k * u[i + 1]
+        bSign = 0
+        switched = true
+      }
+
+      // Paso 5 Gavin: fluencia (elástica → plástica)
+      // f_yield = k2·u[i+1] + (k − k2)·uy·sgn(v[i+1])
+      if (!switched && bSign === 0) {
+        const fYield = k2 * u[i + 1] + (k - k2) * uy * Math.sign(v[i + 1])
+        const fCurr  = k * u[i + 1] + bOff
+        if (v[i + 1] > 0 && fCurr > fYield) {
+          bK    = k2;  bOff = A_off;  bSign = 1
+          switched = true
+        } else if (v[i + 1] < 0 && fCurr < fYield) {
+          bK    = k2;  bOff = B_off;  bSign = -1
+          switched = true
+        }
+      }
+
+      // Paso 7 Gavin: si hubo conmutación, corregir v y a con paso pequeño
+      if (switched) {
+        const dtSmall = dt / 1e4
+        const a1S = m / (betaN * dtSmall * dtSmall) + gammaN * c / (betaN * dtSmall)
+        const pS  = a1S * u[i + 1] + (m / (betaN * dtSmall) + c * (gammaN / betaN - 1.0)) * v[i + 1]
+                  + (m * (0.5 / betaN - 1.0) + dtSmall * c * (0.5 * gammaN / betaN - 1.0)) * a[i + 1]
+        const fsS = bK * u[i + 1] + bOff
+        const uS  = (pS - fsS) / (bK + a1S)   // ≈ u[i+1] (paso ínfimo, δu ≈ 0)
+        v[i + 1]  = gammaN / (betaN * dtSmall) * (uS - u[i + 1])
+                  + (1.0 - gammaN / betaN) * v[i + 1]
+                  + dtSmall * (1.0 - 0.5 * gammaN / betaN) * a[i + 1]
+        a[i + 1]  = (-m * ug[i + 1] - c * v[i + 1] - fsS) / m
+      }
+    }
   }
 
   let maxU = 0, maxV = 0, maxAbs = 0
