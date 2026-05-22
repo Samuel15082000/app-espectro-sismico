@@ -152,12 +152,7 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
             ug: ugMs2,
             tol: 1e-6, maxIter: 50,
           })
-          // maxA relativa calculada aquí (computeSDOF no la expone directamente)
-          let maxRel = 0
-          for (let i = 0; i < res.aRel.length; i++) {
-            if (Math.abs(res.aRel[i]) > maxRel) maxRel = Math.abs(res.aRel[i])
-          }
-          setResult({ ...res, maxA: maxRel, mode: 'nonlinear' })
+          setResult({ ...res, mode: 'nonlinear' })
         }
       } catch (e) {
         setErr(e.message)
@@ -173,7 +168,7 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
     const step = Math.max(1, Math.floor(n / 2000))
     const dF   = DISP_UNITS[dispUnitIdx].factor
     const aF   = ACCEL_UNITS[accelUnitIdx].factor
-    const aArr = result.mode === 'linear' ? result.a : result.aRel
+    const aArr = result.mode === 'linear' ? result.a : result.aAbs
     const data = []
     for (let i = 0; i < n; i += step) {
       data.push({
@@ -372,7 +367,9 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
               {[
                 ['max|u|',     `${(result.maxU * dispU.factor).toFixed(4)} ${dispU.label}`],
                 ['max|v|',     `${result.maxV.toFixed(4)} m/s`],
-                ['max|a_rel|', `${(result.maxA * accelU.factor).toFixed(4)} ${accelU.label}`],
+                result.mode === 'linear'
+                  ? ['max|a_rel|', `${(result.maxA   * accelU.factor).toFixed(4)} ${accelU.label}`]
+                  : ['max|a_abs|', `${(result.maxAbs * accelU.factor).toFixed(4)} ${accelU.label}`],
                 ...(result.mode === 'nonlinear' ? [['Ductilidad', `${result.ductility.toFixed(3)}`]] : []),
                 ['T',          `${result.T.toFixed(4)} s`],
               ].map(([label, val]) => (
@@ -434,12 +431,14 @@ export default function SDOFPanel({ accelArr, dt, fileName, onClose }) {
               maxStr={`max = ${result.maxV.toFixed(4)} m/s`}
             />
 
-            {/* 3. Aceleración relativa a_rel(t) */}
+            {/* 3. Aceleración (relativa para lineal, absoluta para no lineal) */}
             <TimeChart
               data={timeChartData} dataKey="a" color={BLUE}
-              yLabel={`a_rel (${accelU.label})`}
-              title="Aceleración relativa  a_rel(t)"
-              maxStr={`max = ${(result.maxA * accelU.factor).toFixed(4)} ${accelU.label}`}
+              yLabel={result.mode === 'linear' ? `a_rel (${accelU.label})` : `a_abs (${accelU.label})`}
+              title={result.mode === 'linear' ? 'Aceleración relativa  a_rel(t)' : 'Aceleración absoluta  a_abs(t)'}
+              maxStr={result.mode === 'linear'
+                ? `max = ${(result.maxA   * accelU.factor).toFixed(4)} ${accelU.label}`
+                : `max = ${(result.maxAbs * accelU.factor).toFixed(4)} ${accelU.label}`}
             />
 
             {/* 4. Fuerza vs Desplazamiento */}
