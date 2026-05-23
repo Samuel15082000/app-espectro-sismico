@@ -28,7 +28,7 @@ export default function InelasticPanel({ accelArr, dt, fileName, unitFactor, uni
   const [ductilities, setDuctilities] = useState([...DEFAULT_DUCTILITIES])
   const [nPeriods,   setNPeriods]   = useState(200)
   const [TMin,       setTMin]       = useState(0.01)
-  const [TMax,       setTMax]       = useState(5.0)
+  const [TMax,       setTMax]       = useState(10.0)
   const [tol,        setTol]        = useState(1e-6)
   const [maxIter,    setMaxIter]    = useState(50)
 

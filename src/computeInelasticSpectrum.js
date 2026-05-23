@@ -238,7 +238,7 @@ export function computeInelasticSpectrum({
   alpha     = 0.0,
   nPeriods  = 200,
   TMin      = 0.01,
-  TMax      = 5.0,
+  TMax      = 10.0,
   tol       = 1e-6,
   maxIter   = 50,
   betaN     = 0.25,
@@ -252,10 +252,8 @@ export function computeInelasticSpectrum({
   const Ay       = Array.from({ length: nMu }, () => new Float64Array(nPeriods))
   const Sd       = Array.from({ length: nMu }, () => new Float64Array(nPeriods))
 
-  const logTMin = Math.log10(TMin)
-  const logTMax = Math.log10(TMax)
   for (let i = 0; i < nPeriods; i++) {
-    periods[i] = Math.pow(10, logTMin + (logTMax - logTMin) * i / (nPeriods - 1))
+    periods[i] = TMin + i * (TMax - TMin) / (nPeriods - 1)
   }
 
   const m = 1.0
