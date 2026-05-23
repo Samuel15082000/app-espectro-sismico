@@ -165,7 +165,7 @@ function runLinearSDOF({ m, k, xi, betaN, gammaN, dt, ug }) {
 }
 
 // ── Bisección: encontrar uy para ductilidad objetivo ──
-function findUyForDuctility({ m, k, xi, betaN, gammaN, dt, ug, alpha, muTarget, tol, maxIter, maxU_elastic }) {
+function findUyForDuctility({ m, k, xi, betaN, gammaN, dt, ug, alpha, muTarget, tol, maxIter, maxU_elastic, bisecTol, bisecMax }) {
   if (muTarget <= 1.0) {
     const wn2 = k / m
     return {
@@ -177,13 +177,11 @@ function findUyForDuctility({ m, k, xi, betaN, gammaN, dt, ug, alpha, muTarget, 
     }
   }
 
-  let uyLow  = maxU_elastic / (50.0 * muTarget)
-  let uyHigh = maxU_elastic
+  let uyLow  = maxU_elastic / (500.0 * muTarget)
+  let uyHigh = maxU_elastic * 1.05
   let uy     = maxU_elastic / muTarget
   let muActual = 0
   let lastMaxU = 0
-  const bisecTol = 0.02
-  const bisecMax = 40
 
   for (let it = 0; it < bisecMax; it++) {
     const res = runNonlinearSDOF({ m, k, xi, betaN, gammaN, dt, uy, alpha, ug, tol, maxIter })
@@ -241,6 +239,8 @@ export function computeInelasticSpectrum({
   TMax      = 10.0,
   tol       = 1e-6,
   maxIter   = 50,
+  bisecTol  = 0.001,
+  bisecMax  = 60,
   betaN     = 0.25,
   gammaN    = 0.5,
 }) {
@@ -275,7 +275,7 @@ export function computeInelasticSpectrum({
       } else {
         const found = findUyForDuctility({
           m, k, xi, betaN, gammaN, dt, ug, alpha,
-          muTarget: mu, tol, maxIter, maxU_elastic: maxU_el,
+          muTarget: mu, tol, maxIter, maxU_elastic: maxU_el, bisecTol, bisecMax,
         })
         Ay[j][i] = found.Ay * 100.0
         Sd[j][i] = found.maxU * 100.0

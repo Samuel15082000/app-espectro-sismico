@@ -31,6 +31,8 @@ export default function InelasticPanel({ accelArr, dt, fileName, unitFactor, uni
   const [TMax,       setTMax]       = useState(10.0)
   const [tol,        setTol]        = useState(1e-6)
   const [maxIter,    setMaxIter]    = useState(50)
+  const [bisecTol,   setBisecTol]   = useState(0.001)
+  const [bisecMax,   setBisecMax]   = useState(60)
 
   const [result,     setResult]     = useState(null)
   const [loading,    setLoading]    = useState(false)
@@ -71,6 +73,8 @@ export default function InelasticPanel({ accelArr, dt, fileName, unitFactor, uni
           TMax,
           tol,
           maxIter,
+          bisecTol,
+          bisecMax,
         })
         setResult(res)
         setErr(null)
@@ -80,7 +84,7 @@ export default function InelasticPanel({ accelArr, dt, fileName, unitFactor, uni
       }
       setLoading(false)
     }, 50)
-  }, [accelArr, dt, xi, ductilities, nCurves, alpha, nPeriods, TMin, TMax, tol, maxIter, hasRecord])
+  }, [accelArr, dt, xi, ductilities, nCurves, alpha, nPeriods, TMin, TMax, tol, maxIter, bisecTol, bisecMax, hasRecord])
 
   const accelChartData = useMemo(() => {
     if (!accelArr || accelArr.length === 0) return null
@@ -166,15 +170,29 @@ export default function InelasticPanel({ accelArr, dt, fileName, unitFactor, uni
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 10, color: '#8B949E', marginBottom: 2 }}>Tolerancia</div>
+              <div style={{ fontSize: 10, color: '#8B949E', marginBottom: 2 }}>Tol. NR</div>
               <input type="number" min={1e-12} step={1e-7} value={tol}
                 onChange={e => setTol(parseFloat(e.target.value) || 1e-6)}
                 style={inp({ width: '100%', textAlign: 'right', fontSize: 11 })} />
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 10, color: '#8B949E', marginBottom: 2 }}>Max. Iter</div>
+              <div style={{ fontSize: 10, color: '#8B949E', marginBottom: 2 }}>Iter. NR</div>
               <input type="number" min={1} max={500} step={1} value={maxIter}
                 onChange={e => setMaxIter(parseInt(e.target.value) || 50)}
+                style={inp({ width: '100%', textAlign: 'right', fontSize: 11 })} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, color: '#8B949E', marginBottom: 2 }}>Tol. Bisección</div>
+              <input type="number" min={1e-6} step={0.0001} value={bisecTol}
+                onChange={e => setBisecTol(parseFloat(e.target.value) || 0.001)}
+                style={inp({ width: '100%', textAlign: 'right', fontSize: 11 })} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, color: '#8B949E', marginBottom: 2 }}>Iter. Bisección</div>
+              <input type="number" min={1} max={200} step={1} value={bisecMax}
+                onChange={e => setBisecMax(parseInt(e.target.value) || 60)}
                 style={inp({ width: '100%', textAlign: 'right', fontSize: 11 })} />
             </div>
           </div>
