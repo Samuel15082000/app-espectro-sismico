@@ -278,7 +278,7 @@ export default function InelasticPanel({ accelArr, dt, fileName, unitFactor, uni
         {/* Espectro inelástico */}
         <div style={{ flex: 1, minHeight: 0, padding: '8px 12px', display: 'flex', flexDirection: 'column' }}>
           <div style={{ fontSize: 11, color: '#8B949E', marginBottom: 4 }}>
-            Espectro Inelástico — Pseudo-Aceleración de Fluencia (Ay) vs Período T
+            Espectro Inelástico — Aceleración Sa vs Período T
             {result && <span style={{ color: '#3FB950' }}> · ξ = {xi}% · α = {alpha}%</span>}
           </div>
           {result ? (
@@ -288,11 +288,11 @@ export default function InelasticPanel({ accelArr, dt, fileName, unitFactor, uni
                 <XAxis dataKey="T" stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
                   label={{ value: 'Período T (s)', position: 'insideBottom', offset: -8, fill: '#8B949E', fontSize: 10 }} />
                 <YAxis stroke="#21262D" tick={{ fontSize: 10, fill: '#8B949E' }}
-                  label={{ value: 'Ay (cm/s²)', angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 30 }} />
+                  label={{ value: 'Sa (cm/s²)', angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 10, dy: 30 }} />
                 <Tooltip {...tp} labelFormatter={v => `T = ${v} s`} formatter={(v, n) => [`${v} cm/s²`, n]} />
                 <Legend wrapperStyle={{ fontSize: 11, color: '#8B949E', paddingTop: 2 }} />
                 {result.ductilities.map((mu, i) => (
-                  <Line key={i} type="monotone" dataKey={`mu${i}`} name={`μ = ${mu}`}
+                  <Line key={i} type="monotone" dataKey={`sa${i}`} name={`μ = ${mu}`}
                     stroke={DUCT_COLORS[i]} dot={false} strokeWidth={1.5} />
                 ))}
               </LineChart>

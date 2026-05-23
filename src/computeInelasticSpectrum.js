@@ -157,21 +157,23 @@ function runLinearSDOF({ m, k, xi, betaN, gammaN, dt, ug }) {
     a[i + 1] = du / bDt2 - v[i] / bDt - (0.5 / betaN - 1.0) * a[i]
   }
 
-  let maxU = 0
+  let maxU = 0, maxV = 0, maxAbs = 0
   for (let i = 0; i < n; i++) {
+    const aAbsI = Math.abs(a[i] + ug[i])
     if (Math.abs(u[i]) > maxU) maxU = Math.abs(u[i])
+    if (Math.abs(v[i]) > maxV) maxV = Math.abs(v[i])
+    if (aAbsI > maxAbs) maxAbs = aAbsI
   }
-  return { maxU }
+  return { maxU, maxV, maxAbs }
 }
 
 // ── Bisección: encontrar uy para ductilidad objetivo ──
-function findUyForDuctility({ m, k, xi, betaN, gammaN, dt, ug, alpha, muTarget, tol, maxIter, maxU_elastic, bisecTol, bisecMax }) {
+function findUyForDuctility({ m, k, xi, betaN, gammaN, dt, ug, alpha, muTarget, tol, maxIter, maxU_elastic, maxV_elastic, maxAbs_elastic, bisecTol, bisecMax }) {
   if (muTarget <= 1.0) {
-    const wn2 = k / m
     return {
-      uy:    maxU_elastic,
-      Ay:    wn2 * maxU_elastic,
       maxU:  maxU_elastic,
+      maxV:  maxV_elastic,
+      maxAbs: maxAbs_elastic,
       muActual: 1.0,
       converged: true,
     }
@@ -181,12 +183,12 @@ function findUyForDuctility({ m, k, xi, betaN, gammaN, dt, ug, alpha, muTarget, 
   let uyHigh = maxU_elastic * 1.05
   let uy     = maxU_elastic / muTarget
   let muActual = 0
-  let lastMaxU = 0
+  let lastRes = null
 
   for (let it = 0; it < bisecMax; it++) {
     const res = runNonlinearSDOF({ m, k, xi, betaN, gammaN, dt, uy, alpha, ug, tol, maxIter })
     muActual = res.maxU / uy
-    lastMaxU = res.maxU
+    lastRes = res
 
     if (Math.abs(muActual - muTarget) / muTarget < bisecTol) break
 
@@ -198,11 +200,10 @@ function findUyForDuctility({ m, k, xi, betaN, gammaN, dt, ug, alpha, muTarget, 
     uy = 0.5 * (uyLow + uyHigh)
   }
 
-  const wn2 = k / m
   return {
-    uy,
-    Ay: wn2 * uy,
-    maxU: lastMaxU,
+    maxU:  lastRes.maxU,
+    maxV:  lastRes.maxV,
+    maxAbs: lastRes.maxAbs,
     muActual,
     converged: Math.abs(muActual - muTarget) / muTarget < bisecTol,
   }
@@ -249,8 +250,9 @@ export function computeInelasticSpectrum({
 
   const nMu     = ductilities.length
   const periods  = new Float64Array(nPeriods)
-  const Ay       = Array.from({ length: nMu }, () => new Float64Array(nPeriods))
+  const Sa       = Array.from({ length: nMu }, () => new Float64Array(nPeriods))
   const Sd       = Array.from({ length: nMu }, () => new Float64Array(nPeriods))
+  const Sv       = Array.from({ length: nMu }, () => new Float64Array(nPeriods))
 
   for (let i = 0; i < nPeriods; i++) {
     periods[i] = TMin + i * (TMax - TMin) / (nPeriods - 1)
@@ -264,37 +266,40 @@ export function computeInelasticSpectrum({
     const k  = wn * wn * m
 
     const elastic = runLinearSDOF({ m, k, xi, betaN, gammaN, dt, ug })
-    const maxU_el = elastic.maxU
 
     for (let j = 0; j < nMu; j++) {
       const mu = ductilities[j]
 
-      if (mu <= 1.0) {
-        Ay[j][i] = wn * wn * maxU_el * 100.0
-        Sd[j][i] = maxU_el * 100.0
-      } else {
-        const found = findUyForDuctility({
-          m, k, xi, betaN, gammaN, dt, ug, alpha,
-          muTarget: mu, tol, maxIter, maxU_elastic: maxU_el, bisecTol, bisecMax,
-        })
-        Ay[j][i] = found.Ay * 100.0
-        Sd[j][i] = found.maxU * 100.0
-      }
+      const found = (mu <= 1.0)
+        ? { maxU: elastic.maxU, maxV: elastic.maxV, maxAbs: elastic.maxAbs, muActual: 1.0, converged: true }
+        : findUyForDuctility({
+            m, k, xi, betaN, gammaN, dt, ug, alpha,
+            muTarget: mu, tol, maxIter,
+            maxU_elastic: elastic.maxU, maxV_elastic: elastic.maxV, maxAbs_elastic: elastic.maxAbs,
+            bisecTol, bisecMax,
+          })
+
+      Sd[j][i] = found.maxU * 100.0
+      Sv[j][i] = found.maxV * 100.0
+      Sa[j][i] = found.maxAbs * 100.0
     }
   }
 
   const chartData = Array.from(periods, (T, i) => {
     const pt = { T: parseFloat(T.toFixed(4)) }
     for (let j = 0; j < nMu; j++) {
-      pt[`mu${j}`] = parseFloat(Ay[j][i].toFixed(3))
+      pt[`sa${j}`] = parseFloat(Sa[j][i].toFixed(3))
+      pt[`sd${j}`] = parseFloat(Sd[j][i].toFixed(6))
+      pt[`sv${j}`] = parseFloat(Sv[j][i].toFixed(6))
     }
     return pt
   })
 
   return {
     periods: Array.from(periods),
-    Ay:      Ay.map(a => Array.from(a)),
+    Sa:      Sa.map(a => Array.from(a)),
     Sd:      Sd.map(a => Array.from(a)),
+    Sv:      Sv.map(a => Array.from(a)),
     ductilities: [...ductilities],
     chartData,
   }
@@ -313,21 +318,27 @@ export function exportInelasticTxt(result, fileName, xi, alpha, unitLabel) {
 
   txt += `  ${p('T(s)')}`
   for (let j = 0; j < result.ductilities.length; j++) {
-    txt += p(`Ay_mu${result.ductilities[j]}(${unitLabel})`)
+    txt += p(`Sa_mu${result.ductilities[j]}(${unitLabel})`)
   }
   for (let j = 0; j < result.ductilities.length; j++) {
     txt += p(`Sd_mu${result.ductilities[j]}(cm)`)
   }
+  for (let j = 0; j < result.ductilities.length; j++) {
+    txt += p(`Sv_mu${result.ductilities[j]}(cm/s)`)
+  }
   txt += '\n'
-  txt += `  ${'-'.repeat(W * (1 + 2 * result.ductilities.length))}\n`
+  txt += `  ${'-'.repeat(W * (1 + 3 * result.ductilities.length))}\n`
 
   for (let i = 0; i < result.periods.length; i++) {
     txt += `  ${p(result.periods[i].toFixed(4))}`
     for (let j = 0; j < result.ductilities.length; j++) {
-      txt += p(result.Ay[j][i].toFixed(4))
+      txt += p(result.Sa[j][i].toFixed(4))
     }
     for (let j = 0; j < result.ductilities.length; j++) {
       txt += p(result.Sd[j][i].toFixed(4))
+    }
+    for (let j = 0; j < result.ductilities.length; j++) {
+      txt += p(result.Sv[j][i].toFixed(4))
     }
     txt += '\n'
   }
