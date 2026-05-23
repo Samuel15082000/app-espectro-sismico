@@ -10,8 +10,9 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import BaselinePanel from './BaselinePanel'
-import SDOFPanel     from './SDOFPanel'
+import BaselinePanel   from './BaselinePanel'
+import SDOFPanel       from './SDOFPanel'
+import InelasticPanel  from './InelasticPanel'
 
 // ---------------------------------------------------------------------------
 const UNIT_OPTIONS = [
@@ -829,10 +830,14 @@ export default function EjemploEspectro() {
           </div>
 
           {/* ── Tab 2: Espectros Inelásticos ── */}
-          <div style={{ flex: 1, display: activeTab === 2 ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 14 }}>
-            <div style={{ fontSize: 48, opacity: 0.15 }}>⚡</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#555' }}>Espectros Inelásticos</div>
-            <div style={{ fontSize: 12, color: '#3A3D45' }}>Próximamente</div>
+          <div style={{ flex: 1, display: activeTab === 2 ? 'flex' : 'none', overflow: 'hidden' }}>
+            <InelasticPanel
+              accelArr={seismic.parsedRef.current.accel || []}
+              dt={seismic.parsedRef.current.dt || 0.01}
+              fileName={seismic.fileName}
+              unitFactor={unitFactor}
+              unitLabel={UNIT_OPTIONS[unitIdx].label}
+            />
           </div>
 
           {/* ── Tab 3: Sistemas de 1 GDL ── */}
